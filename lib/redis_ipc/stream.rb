@@ -10,27 +10,28 @@ module RedisIPC
     class_attribute :stream_name
     class_attribute :group_name
 
-    attr_reader :options, :redis_pool, :consumer_threads
+    attr_reader :redis_options, :options, :redis_pool, :consumer_threads
 
     def initialize(stream, group: nil, options: {}, redis_options: {})
       self.stream_name = stream
       self.group_name = group
 
+      @redis_options = REDIS_DEFAULTS.merge(redis_options)
       @options = {
         # 1ms execution
         consumers: {
-          worker_count: 2,
+          count: 2,
           execution_interval: 0.001
         },
         dispatchers: {
-          worker_count: 2
+          count: 2
         },
         sender: {
-          destination: nil
+          timeout: 5 # Seconds
         }
       }.deep_merge(options)
 
-      create_redis_pool(REDIS_DEFAULTS.merge(redis_options))
+      create_redis_pool
       create_consumer_stream
       create_consumer_pool
     end
@@ -43,37 +44,47 @@ module RedisIPC
     # @return [<Type>] <Description>
     #
     def send(content:, to: nil)
-      to ||= @options.dig(:sender, :destination)
-
       if to.blank?
         raise ArgumentError,
           "A group must be provided to the to: kwarg or provided during initialization as an option"
       end
 
-
       promise = Concurrent::Promise.execute do
-        consumer = nil
-        post_content_to_stream(to, content)
+        consumer_pool.with do |consumer|
+          message_id = post_content_to_stream(consumer.id, to, content)
+
+          observer = consumer.add_observer(ResponseObserver.new(message_id))
+          result = observer.take(options[:sender][:timeout])
+
+          # Ensure this observer is removed so it doesn't keep processing
+          consumer.delete_observer(observer)
+
+          # Failed to get a message back
+          raise TimeoutError if result == MVar::TIMEOUT
+        end
+
+        result
       end
 
-      # promise = promise.then do |result|
-      #   # Check for timeout or response
-      #   # Fullfil if response
-      #   # Reject if timeout
-      # end
 
       promise.value
     end
 
     private
 
-    def create_redis_pool(redis_options)
-      pool_size = @options[:consumers][:worker_count]
+    def post_content_to_stream(sending_consumer_id, destination_group, content)
+      redis_pool.with do |redis|
+        redis.xadd(@stream, {
+          dispatch: {sender: sending_consumer_id, destination: destination_group},
+          content: JSON.generate(content)
+        })
+      end
+    end
 
-      @redis_pool =
-        ConnectionPool.new(size: pool_size) do
-          Redis.new(**redis_options)
-        end
+    def create_redis_pool
+      @redis_pool = ConnectionPool.new(size: 5) do
+        Redis.new(**redis_options)
+      end
     end
 
     def create_consumer_stream
@@ -85,17 +96,31 @@ module RedisIPC
     end
 
     def create_consumer_pool
-      @consumer_pool =
-        ConnectionPool.new(size: 5) do
-        end
+      consumer_count = options[:consumers][:count]
+
+      @consumer_pool = ConnectionPool.new(size: consumer_count) do |i|
+        consumer = Consumer.new(
+          "consumer_#{i}",
+          group: group_name,
+          options: options[:consumers],
+          redis_options: redis_options
+        )
+
+        consumer.listen(:pending)
+        consumer
+      end
     end
 
-    def post_content_to_stream(sending_consumer_id, destination_group, content)
-      redis_pool.with do |redis|
-        redis.xadd(@stream, {
-          dispatch: {sender: sending_consumer_id, destination: destination_group},
-          content: JSON.generate(content)
-        })
+    def create_dispatchers
+      dispatcher_count = options[:dispatchers][:count]
+
+      @dispatchers = dispatcher_count.times do |i|
+        Dispatcher.new(
+          "dispatcher_#{i}",
+          group: group_name,
+          options: options[:consumers],
+          redis_options: redis_options
+        )
       end
     end
   end
