@@ -2,11 +2,6 @@
 
 module RedisIPC
   class Stream
-    REDIS_DEFAULTS = {
-      host: ENV.fetch("REDIS_HOST", "localhost"),
-      port: ENV.fetch("REDIS_PORT", 6379)
-    }.freeze
-
     class_attribute :stream_name
     class_attribute :group_name
 
@@ -16,13 +11,9 @@ module RedisIPC
       self.stream_name = stream
       self.group_name = group
 
-      @redis_options = REDIS_DEFAULTS.merge(redis_options)
+      @redis_options = RedisIPC::REDIS_DEFAULTS.merge(redis_options)
       @options = {
-        # 1ms execution
-        consumers: {
-          count: 2,
-          execution_interval: 0.001
-        },
+        consumers: Consumer::DEFAULTS,
         dispatchers: {
           count: 2
         },
@@ -32,28 +23,18 @@ module RedisIPC
       }.deep_merge(options)
 
       create_redis_pool
-      create_consumer_stream
       create_consumer_pool
     end
 
-    #
-    # Posts content into the stream for consumers to process
-    #
-    # @param content [String, Hash, Array] Anything that can be converted to JSON
-    #
-    # @return [<Type>] <Description>
-    #
-    def send(content:, to: nil)
-      if to.blank?
-        raise ArgumentError,
-          "A group must be provided to the to: kwarg or provided during initialization as an option"
-      end
-
+    def send(content:, to:)
       promise = Concurrent::Promise.execute do
         consumer_pool.with do |consumer|
           message_id = post_content_to_stream(consumer.id, to, content)
 
           observer = consumer.add_observer(ResponseObserver.new(message_id))
+
+          # The observer holds onto a MVar that stores the message
+          # This blocks until the message comes back or timeout is returned
           result = observer.take(options[:sender][:timeout])
 
           # Ensure this observer is removed so it doesn't keep processing
@@ -66,7 +47,6 @@ module RedisIPC
         result
       end
 
-
       promise.value
     end
 
@@ -76,7 +56,7 @@ module RedisIPC
       redis_pool.with do |redis|
         redis.xadd(@stream, {
           dispatch: {sender: sending_consumer_id, destination: destination_group},
-          content: JSON.generate(content)
+          content: content
         })
       end
     end
@@ -87,18 +67,10 @@ module RedisIPC
       end
     end
 
-    def create_consumer_stream
-      redis_pool.with do |redis|
-        return if redis.exists?(stream_name)
-
-        redis.xgroup(:create, stream_name, group_name, "$", mkstream: true)
-      end
-    end
-
     def create_consumer_pool
-      consumer_count = options[:consumers][:count]
+      pool_size = options[:consumers][:pool_size]
 
-      @consumer_pool = ConnectionPool.new(size: consumer_count) do |i|
+      @consumer_pool = ConnectionPool.new(size: pool_size) do |i|
         consumer = Consumer.new(
           "consumer_#{i}",
           group: group_name,
