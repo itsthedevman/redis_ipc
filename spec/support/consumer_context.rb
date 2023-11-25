@@ -32,15 +32,16 @@ RSpec.shared_context("stream") do
 
     observer = consumer.add_observer do |time, result, exception|
       response = exception || result
-      consumer.dispose
+      consumer.stop_listening
     end
 
-    consumer.listen(type)
+    task = consumer.listen(type)
 
-    while consumer.running?
+    while task.running?
       sleep(0.1)
     end
 
+    consumer.delete_observer(observer)
     raise response if response.is_a?(Exception)
 
     redis.xack(stream_name, group_name, response[:message_id]) if ack

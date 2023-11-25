@@ -12,7 +12,7 @@ module RedisIPC
 
     alias_method :id, :name
 
-    delegate :add_observer, :running?, to: :@task
+    delegate :add_observer, :delete_observer, to: :@task
 
     def initialize(name, stream:, group:, options: {}, redis_options: {})
       @name = name
@@ -39,11 +39,11 @@ module RedisIPC
         # Only reading one message at a time
         (message_id, content) = response.values.flatten
 
-        {message_id: message_id, content: content&.with_indifferent_access}
+        {message_id: message_id, content: content}
       end
     end
 
-    def dispose
+    def stop_listening
       @task.shutdown
     end
 

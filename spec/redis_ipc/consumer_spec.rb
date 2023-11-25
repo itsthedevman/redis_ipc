@@ -26,7 +26,7 @@ describe RedisIPC::Consumer do
       it "reads messages from the PEL for this consumer" do
         message_id = redis.xadd(stream_name, {key_1: "value_1"})
 
-        # Pretend we're a dispatcher and read incoming messages
+        # Pretend we're a dispatcher and read incoming messagesQ
         wait_for_response!(consumer, :unread, ack: false)
 
         # Reading the message above without an ACK will move it into the PEL
@@ -43,7 +43,4 @@ describe RedisIPC::Consumer do
     end
   end
 
-  describe "#dispose" do
-    it "stops the task"
-  end
 end
