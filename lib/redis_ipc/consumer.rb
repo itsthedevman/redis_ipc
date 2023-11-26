@@ -56,6 +56,10 @@ module RedisIPC
       @task
     end
 
+    def acknowledge(message_id)
+      redis.xack(stream_name, group_name, message_id)
+    end
+
     private
 
     def ensure_consumer_group_exists
