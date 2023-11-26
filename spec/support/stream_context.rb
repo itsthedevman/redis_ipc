@@ -44,7 +44,7 @@ RSpec.shared_context("stream") do
     consumer.delete_observer(observer)
     raise response if response.is_a?(Exception)
 
-    redis.xack(stream_name, group_name, response[:message_id]) if ack
+    consumer.acknowledge(response[:message_id]) if ack
     response
   end
 end

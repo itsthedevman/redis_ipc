@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
 describe RedisIPC::Stream do
-  let!(:stream_name) { "example_stream" }
-  let!(:group_name) { "example_group" }
+  include_context "stream"
 
   subject(:stream) do
     described_class.new(stream_name, group: group_name)
