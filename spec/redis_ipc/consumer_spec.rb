@@ -31,7 +31,7 @@ describe RedisIPC::Consumer do
 
         # Reading the message above without an ACK will move it into the PEL
         # Allowing us to "dispatch" the message to a consumer
-        redis.xclaim(stream_name, group_name, consumer.id, 0, message_id)
+        redis.xclaim(stream_name, group_name, consumer.name, 0, message_id)
 
         # Which we can now read from that consumer's PEL with an ACK
         response = wait_for_response!(consumer, :pending)

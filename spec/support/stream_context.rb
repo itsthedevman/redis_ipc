@@ -13,7 +13,7 @@ RSpec.shared_context("stream") do
   end
 
   def redis
-    @redis ||= Redis.new(**RedisIPC::REDIS_DEFAULTS)
+    @redis ||= Redis.new(**RedisIPC::DEFAULTS)
   end
 
   def create_stream
