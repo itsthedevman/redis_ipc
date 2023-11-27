@@ -19,7 +19,7 @@ require "redis"
 end
 
 module RedisIPC
-  REDIS_DEFAULTS = {
+  DEFAULTS = {
     host: ENV.fetch("REDIS_HOST", "localhost"),
     port: ENV.fetch("REDIS_PORT", 6379)
   }.freeze
@@ -66,7 +66,8 @@ end
 [
   "consumer",
   "dispatcher",
-  "response_observer",
+  "entry",
+  "sender",
   "stream",
   "version"
 ].each { |m| require_relative "./redis_ipc/#{m}" }
