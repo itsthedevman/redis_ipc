@@ -4,7 +4,8 @@ module RedisIPC
   class Consumer
     DEFAULTS = {
       pool_size: 2,
-      execution_interval: 0.01 # Seconds
+      execution_interval: 0.01, # Seconds
+      read_group_id: "0" # Read the latest message from this consumers Pending Entries List (PEL)
     }.freeze
 
     attr_reader :name, :stream_name, :group_name, :redis
@@ -18,14 +19,8 @@ module RedisIPC
       @options = DEFAULTS.merge(options)
       @redis = Redis.new(redis_options)
 
-      # Read the latest message from this consumers Pending Entries List (PEL)
-      @read_group_id = "0"
-
       # This is the workhorse for the consumer
-      @task = Concurrent::TimerTask.new(
-        execution_interval: @options[:execution_interval],
-        &method(:process_next_message)
-      )
+      @task = Concurrent::TimerTask.new(execution_interval: @options[:execution_interval]) { process_next_message }
     end
 
     def stop_listening
@@ -45,16 +40,20 @@ module RedisIPC
     private
 
     def process_next_message
-      # response = { "stream_name" => [["message_id", "destination_group", content]] }
-      response = redis.xreadgroup(group_name, name, stream_name, @read_group_id, count: 1)
-      return if response.nil?
+      # response = ["message_id", { "group": "destination_group", "content": "content"}]
+      response = redis.xreadgroup(group_name, name, stream_name, @options[:read_group_id], count: 1)&.values&.flatten
+      return if response.blank?
 
       debug!(name: name, stream: stream_name, group: group_name, response: response)
 
       # Any observers will receive this Entry instance
       # If no observer reads this message, it will stay in the PEL until timeout
-      # NOTE: Options support reading more than
-      Entry[*response.values.flatten]
+      # NOTE: Options support reading more than message at a time, but this does not!!
+      message_id, message = response
+      Entry.new(message_id: message_id, **message)
+    rescue => e
+      error!(e)
+      nil
     end
 
     def ensure_group_exists
