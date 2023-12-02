@@ -27,7 +27,13 @@ RSpec.shared_context("stream") do
     redis.del(stream_name)
   end
 
-  def wait_for_response!(consumer, type, ack: true)
+  def send_and_wait!(consumer, content:, ack: false)
+    entry = RedisIPC::Entry.new(group: group_name, content: content)
+    redis.xadd(stream_name, entry.to_h)
+    wait_for_response!(consumer, ack: ack)
+  end
+
+  def wait_for_response!(consumer, ack: true)
     response = nil
 
     observer = consumer.add_observer do |time, result, exception|
@@ -35,16 +41,21 @@ RSpec.shared_context("stream") do
       consumer.stop_listening
     end
 
-    task = consumer.listen(type)
+    task = consumer.listen
 
     while task.running?
       sleep(0.1)
     end
 
     consumer.delete_observer(observer)
+    return if response.nil?
     raise response if response.is_a?(Exception)
 
-    consumer.acknowledge(response[:message_id]) if ack
+    consumer.acknowledge(response.message_id) if ack
     response
+  end
+
+  def claim_message(consumer, message)
+    redis.xclaim(stream_name, group_name, consumer.name, 0, message.id)
   end
 end

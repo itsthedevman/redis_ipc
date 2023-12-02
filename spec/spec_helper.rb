@@ -2,6 +2,7 @@
 
 require "redis_ipc"
 require "pry"
+require "faker"
 
 Dir.glob(File.expand_path("./spec/support/**/*.rb")).each { |m| require m }
 RedisIPC.logger = Logger.new($stdout)

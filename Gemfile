@@ -6,6 +6,7 @@ source "https://rubygems.org"
 gemspec
 
 group :development, :test do
+  gem "faker"
   gem "rspec", "~> 3.0"
   gem "rubocop", "~> 1.21"
   gem "standardrb", "~> 1.0"

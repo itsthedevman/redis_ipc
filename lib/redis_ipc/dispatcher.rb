@@ -8,6 +8,9 @@ module RedisIPC
       read_group_id: ">" # Read the latest unread message for the group
     }.freeze
 
+    MOVE_AHEAD = -1
+    MOVE_BEHIND = 1
+
     def initialize(name, consumer_names = [], **)
       @consumer_names = consumer_names
       super(name, options: DEFAULTS, **)
@@ -22,52 +25,64 @@ module RedisIPC
       redis.xclaim(stream_name, group_name, consumer_name, 0, entry.message_id)
     end
 
-    private
-
-    def find_load_balanced_consumer
-      busy_consumers = redis.xinfo(:consumers, stream_name, group_name)
+    def consumer_stats
+      redis.xinfo(:consumers, stream_name, group_name)
         .index_by { |consumer| consumer["name"] }
         .select { |name, _| @consumer_names.include?(name) }
+    end
+
+    private
+
+    #
+    # Load balances the consumers and returns the least busiest
+    #
+    # @return [Consumer]
+    #
+    def find_load_balanced_consumer
+      busy_consumers = consumer_stats
 
       available_consumers =
         @consumer_names.sort do |consumer_a_name, consumer_b_name|
           consumer_a_info = busy_consumers[consumer_a_name]
           consumer_b_info = busy_consumers[consumer_b_name]
 
-          # Since nil <=> nil is nil, and it needs to be -1, 0, 1
-          consumer_a_is_free = consumer_a_info.nil? ? 0 : 1
-          consumer_b_is_free = consumer_b_info.nil? ? 0 : 1
+          # Self explanatory
+          consumer_a_is_free = consumer_a_info.nil?
+          consumer_b_is_free = consumer_b_info.nil?
 
-          debug!(a: {name: consumer_a_name, free: consumer_a_is_free == 0}, b: {name: consumer_b_name, free: consumer_b_is_free == 0})
+          next MOVE_AHEAD if consumer_a_is_free
+          next MOVE_BEHIND if consumer_b_is_free
 
-          if consumer_a_is_free + consumer_b_is_free > 0
-            # -1 if consumer_a is free
-            # 1 if consumer_a is busy
-            next consumer_a_is_free <=> consumer_b_is_free
-          end
-
-          # Number of pending messages
+          # Sorts if either don't have pending messages
+          # Only continues if both consumers have the same number of messages, but greater than 0
           consumer_a_pending = consumer_a_info&.dig("pending") || 0
           consumer_b_pending = consumer_b_info&.dig("pending") || 0
 
-          debug!(a: {name: consumer_a_name, pending: consumer_a_pending}, b: {name: consumer_b_name, pending: consumer_b_pending})
-          if consumer_a_pending != consumer_b_pending
-            # -1 if consumer_a has less pending messages than consumer_b
-            # 1 if consumer_a has more pending messages than consumer_b
-            next consumer_a_pending <=> consumer_b_pending
-          end
+          next MOVE_AHEAD if consumer_a_pending.zero?
+          next MOVE_BEHIND if consumer_b_pending.zero?
+          next MOVE_AHEAD if consumer_a_pending < consumer_b_pending
+          next MOVE_BEHIND if consumer_b_pending < consumer_a_pending
 
-          consumer_a_time = (consumer_a_info&.dig("idle") || 0) + (consumer_a_info&.dig("inactive") || 0)
-          consumer_b_time = (consumer_b_info&.dig("idle") || 0) + (consumer_b_info&.dig("inactive") || 0)
+          # Sorts if either are inactive
+          consumer_a_inactive_time = consumer_a_info&.dig("inactive") || 0
+          consumer_a_is_inactive = consumer_a_inactive_time.zero?
+          consumer_a_idle_time = consumer_a_info&.dig("idle") || 0
 
-          debug!(a: {name: consumer_a_name, time: consumer_a_time}, b: {name: consumer_b_name, time: consumer_b_time})
+          consumer_b_inactive_time = consumer_b_info&.dig("inactive") || 0
+          consumer_b_is_inactive = consumer_b_inactive_time.zero?
+          consumer_b_idle_time = consumer_b_info&.dig("idle") || 0
 
-          # -1 if consumer_a has been idle/inactive for less time than consumer_b
-          # 1 if consumer_a has been idle/inactive for more time than consumer_b
-          consumer_a_time <=> consumer_b_time
+          next MOVE_AHEAD if consumer_a_is_inactive && consumer_a_idle_time > consumer_b_idle_time
+          next MOVE_BEHIND if consumer_b_is_inactive && consumer_b_idle_time > consumer_a_idle_time
+
+          # At this point both consumers have a > 0 inactive time, meaning they are both processing a request
+          # and haven't finished yet. Since it isn't possible to calculate how much longer it will take
+          # for the consumers to take to finish processing their requests, I have decided to go with sorting
+          # base on the idle time instead of inactive time. Bonus, this becomes a "catch-all"
+
+          # This is backwards because consumer_a idle time needs to be greater if this is to move ahead
+          consumer_b_idle_time <=> consumer_a_idle_time
         end
-
-      debug!(busy: busy_consumers, available: available_consumers)
 
       available_consumers.first
     end
