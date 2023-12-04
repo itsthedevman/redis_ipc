@@ -50,7 +50,7 @@ module RedisIPC
       id, entry = response
       Entry.new(id: id, **entry)
     rescue => e
-      error!(e)
+      RedisIPC.logger&.error(JSON.generate(message: e.message, backtrace: e.backtrace))
       nil
     end
 
