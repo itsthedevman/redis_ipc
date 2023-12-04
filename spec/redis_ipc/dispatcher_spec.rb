@@ -38,12 +38,6 @@ describe RedisIPC::Dispatcher do
     end
   end
 
-  describe "#process_unread_message" do
-    context "when a message arrives with a consumer" do
-      it "forwards it to a consumer"
-    end
-  end
-
   describe "#find_load_balanced_consumer" do
     subject(:balanced_consumer_name) { dispatcher.send(:find_load_balanced_consumer) }
 
