@@ -33,24 +33,22 @@ module RedisIPC
       @task
     end
 
-    def acknowledge(message_id)
-      redis.xack(stream_name, group_name, message_id)
+    def acknowledge(id)
+      redis.xack(stream_name, group_name, id)
     end
 
     private
 
     def process_next_message
-      # response = ["message_id", { "group": "destination_group", "content": "content"}]
       response = redis.xreadgroup(group_name, name, stream_name, @options[:read_group_id], count: 1)&.values&.flatten
       return if response.blank?
-
-      debug!(name: name, stream: stream_name, group: group_name, response: response)
 
       # Any observers will receive this Entry instance
       # If no observer reads this message, it will stay in the PEL until timeout
       # NOTE: Options support reading more than message at a time, but this does not!!
-      message_id, message = response
-      Entry.new(message_id: message_id, **message)
+      # response = ["id", { "consumer": null, "group": "destination_group", "content": "content"}]
+      id, entry = response
+      Entry.new(id: id, **entry)
     rescue => e
       error!(e)
       nil

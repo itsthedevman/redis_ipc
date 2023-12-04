@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 module RedisIPC
+  #
+  # A consumer that reads unread messages and assigns them to consumers to be processed
+  #
   class Dispatcher < Consumer
     DEFAULTS = {
       pool_size: 2,
@@ -15,14 +18,17 @@ module RedisIPC
       @consumer_names = consumer_names
       super(name, options: DEFAULTS, **)
 
-      add_observer(self, :on_message)
+      add_observer(self, :process_unread_message)
     end
 
-    def on_message(_, entry, exception)
+    def process_unread_message(_, entry, exception)
       return unless entry.group == group_name
 
-      consumer_name = find_load_balanced_consumer
-      redis.xclaim(stream_name, group_name, consumer_name, 0, entry.message_id)
+      # Ensure the consumer provided exists
+      consumer_name = entry.consumer
+
+      find_load_balanced_consumer
+      redis.xclaim(stream_name, group_name, consumer_name, 0, entry.id)
     end
 
     def consumer_stats

@@ -4,16 +4,15 @@ module RedisIPC
   #
   # Represents an entry in the Redis Stream
   #
-  class Entry < Data.define(:message_id, :group, :content)
-    alias_method :id, :message_id
-
-    def initialize(message_id: nil, **)
-      super(message_id: message_id, **)
+  class Entry < Data.define(:id, :group, :content, :consumer)
+    def initialize(id: nil, consumer: nil, **)
+      super(id: id, consumer: consumer, **)
     end
 
     def to_h
       {group: group, content: content}.tap do |hash|
-        hash[:message_id] = message_id if message_id.present?
+        hash[:id] = id if id.present?
+        hash[:consumer] = consumer if consumer.present?
       end
     end
   end

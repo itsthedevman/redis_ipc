@@ -17,8 +17,8 @@ module RedisIPC
     end
 
     def send_with(consumer, destination_group:, content:)
-      message_id = post_to_stream(destination_group, content)
-      response = wait_for_response(consumer, message_id)
+      entry_id = post_to_stream(destination_group, content)
+      response = wait_for_response(consumer, entry_id)
 
       # Failed to get a message back
       raise TimeoutError if response == MVar::TIMEOUT
@@ -28,15 +28,15 @@ module RedisIPC
 
     private
 
-    def post_to_stream(destination_group, content)
-      entry = Entry.new(group: destination_group, content: content)
+    def post_to_stream(consumer, destination_group, content)
+      entry = Entry.new(consumer: consumer.name, group: destination_group, content: content)
 
       @redis_pool.with do |redis|
         redis.xadd(@stream_name, entry.to_h)
       end
     end
 
-    def wait_for_response(consumer, waiting_for_message_id)
+    def wait_for_response(consumer, waiting_for_id)
       @redis_pool.with do |redis|
         # (Pls correct me if I'm wrong) I don't believe this needs to be a thread-safe variable in this context
         # However, by using MVar I get waiting and timeout support, plus the thread-safety, out of the box.
@@ -45,9 +45,9 @@ module RedisIPC
 
         observer = consumer.add_observer do |_, entry, exception|
           raise exception if exception
-          next unless entry.message_id == waiting_for_message_id
+          next unless entry.id == waiting_for_id
 
-          consumer.acknowledge(waiting_for_message_id)
+          consumer.acknowledge(waiting_for_id)
           response.put(entry.content)
         end
 
