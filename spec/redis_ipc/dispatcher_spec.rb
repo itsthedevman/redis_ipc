@@ -23,31 +23,13 @@ describe RedisIPC::Dispatcher do
   end
 
   describe "#listen" do
-    context "when the type is :pending" do
-      it "reads messages from the PEL for this consumer"
-      # REWRITE
-      # do
-      #   message_id = redis.xadd(stream_name, {key_1: "value_1"})
-
-      #   #
-      #   wait_for_response!(dispatcher, ack: false)
-
-      #   # Reading the message above without an ACK will move it into the PEL
-      #   # Allowing us to "dispatch" the message to a consumer
-      #   redis.xclaim(stream_name, group_name, consumer.name, 0, message_id)
-
-      #   # Which we can now read from that consumer's PEL with an ACK
-      #   response = wait_for_response!(consumer, :pending)
-
-      #   # And finally validate it
-      #   expect(response[:message_id]).to eq(message_id)
-      #   expect(response[:content]).to eq("key_1" => "value_1")
-      # end
+    context "when data is first received by the group" do
+      it "reads in the data in as an Entry and assigns it to the least busy consumer"
     end
   end
 
-  describe "#on_message" do
-    context "when a message arrives" do
+  describe "#process_unread_message" do
+    context "when a message arrives with a consumer" do
       it "forwards it to a consumer"
     end
   end
@@ -75,8 +57,7 @@ describe RedisIPC::Dispatcher do
 
       before do
         consumer_sampler.each do |consumer|
-          message = send_and_wait!(dispatcher, content: "Hello #{consumer.name}")
-          claim_message(consumer, message)
+          send_to(consumer, dispatcher, content: "Hello #{consumer.name}")
         end
       end
 
@@ -91,8 +72,7 @@ describe RedisIPC::Dispatcher do
         consumers.shuffle.each_with_index do |consumer, index|
           # Using the index to ensure a the proper ordering to check against
           (index + 1).times do
-            message = send_and_wait!(dispatcher, content: "Hello #{consumer.name}")
-            claim_message(consumer, message)
+            send_to(consumer, dispatcher, content: "Hello #{consumer.name}")
           end
         end
       end
@@ -107,10 +87,9 @@ describe RedisIPC::Dispatcher do
     context "when all consumers have equal pending messages" do
       before do
         consumers.shuffle.each do |consumer|
-          sleep(rand)
+          sleep(rand / 1000) # We're working with the milliseconds, this doesn't need to delay very long
 
-          message = send_and_wait!(dispatcher, content: "Hello #{consumer.name}")
-          claim_message(consumer, message)
+          send_to(consumer, dispatcher, content: "Hello #{consumer.name}")
         end
       end
 

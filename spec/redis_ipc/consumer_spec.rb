@@ -12,35 +12,32 @@ describe RedisIPC::Consumer do
   end
 
   describe "#listen" do
-    context "when the type is :unread" do
-      it "reads messages from the group (acts like a Dispatcher)" do
-        message_id = redis.xadd(stream_name, {key_1: "value_1"})
-        response = wait_for_response!(consumer, :unread)
+    context "when a messages is dispatched to this consumer" do
+      it "creates a Entry instance and broadcasts to all observers without acknowledging it" do
+        content = Faker::String.random
 
-        expect(response[:message_id]).to eq(message_id)
-        expect(response[:content]).to eq("key_1" => "value_1")
-      end
-    end
+        id = send_to(consumer, content: content)
 
-    context "when the type is :pending" do
-      it "reads messages from the PEL for this consumer" do
-        message_id = redis.xadd(stream_name, {key_1: "value_1"})
+        response = nil
+        consumer.add_observer do |time, result, exception|
+          response = exception || result
+          consumer.stop_listening
+        end
 
-        # Pretend we're a dispatcher and read incoming messagesQ
-        wait_for_response!(consumer, :unread, ack: false)
+        task = consumer.listen
 
-        # Reading the message above without an ACK will move it into the PEL
-        # Allowing us to "dispatch" the message to a consumer
-        redis.xclaim(stream_name, group_name, consumer.name, 0, message_id)
+        while task.running?
+          sleep(0.1)
+        end
 
-        # Which we can now read from that consumer's PEL with an ACK
-        response = wait_for_response!(consumer, :pending)
+        expect(response).to be_kind_of(RedisIPC::Entry)
+        expect(response.id).to eq(id)
+        expect(response.content).to eq(content)
 
-        # And finally validate it
-        expect(response[:message_id]).to eq(message_id)
-        expect(response[:content]).to eq("key_1" => "value_1")
+        consumer_info = redis.xinfo(:consumers, stream_name, group_name).find { |c| c["name"] == consumer.name }
+        expect(consumer_info).not_to be_nil
+        expect(consumer_info["pending"]).to eq(1)
       end
     end
   end
-
 end
