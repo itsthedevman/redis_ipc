@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    redis_ipc (0.1.0)
+    redis_ipc (0.5.0)
       activesupport (~> 7.1)
       concurrent-ruby (~> 1.2)
       concurrent-ruby-ext (~> 1.2)

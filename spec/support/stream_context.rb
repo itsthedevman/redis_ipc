@@ -16,6 +16,14 @@ RSpec.shared_context("stream") do
     @redis ||= Redis.new(**RedisIPC::DEFAULTS)
   end
 
+  def consumer_stats
+    redis.xinfo(:consumers, stream_name, group_name)
+  end
+
+  def consumer_only_stats(consumer_names)
+    consumer_stats.select { |c| consumer_names.include?(c["name"]) }
+  end
+
   def create_stream
     return if redis.exists?(stream_name)
 

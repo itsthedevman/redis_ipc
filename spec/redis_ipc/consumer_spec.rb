@@ -34,7 +34,7 @@ describe RedisIPC::Consumer do
         expect(response.id).to eq(id)
         expect(response.content).to eq(content)
 
-        consumer_info = redis.xinfo(:consumers, stream_name, group_name).find { |c| c["name"] == consumer.name }
+        consumer_info = consumer_stats.find { |c| c["name"] == consumer.name }
         expect(consumer_info).not_to be_nil
         expect(consumer_info["pending"]).to eq(1)
       end

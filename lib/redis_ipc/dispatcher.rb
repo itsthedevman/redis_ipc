@@ -23,11 +23,9 @@ module RedisIPC
 
     def process_unread_message(_, entry, exception)
       return unless entry.group == group_name
+      return unless entry.consumer.nil? || @consumer_names.include?(entry.consumer)
 
-      # Ensure the consumer provided exists
-      consumer_name = entry.consumer
-
-      find_load_balanced_consumer
+      consumer_name = entry.consumer || find_load_balanced_consumer
       redis.xclaim(stream_name, group_name, consumer_name, 0, entry.id)
     end
 

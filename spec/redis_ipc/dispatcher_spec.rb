@@ -24,7 +24,17 @@ describe RedisIPC::Dispatcher do
 
   describe "#listen" do
     context "when data is first received by the group" do
-      it "reads in the data in as an Entry and assigns it to the least busy consumer"
+      it "reads in the data as an Entry and assigns it to the least busy consumer" do
+        add_to_stream(content: Faker::String.random)
+
+        expect(consumer_stats).to be_empty
+
+        dispatcher.listen
+        sleep(rand)
+        dispatcher.stop_listening
+
+        expect(consumer_stats).to include(hash_including("name" => "test_consumer_0", "pending" => 1))
+      end
     end
   end
 
@@ -57,7 +67,7 @@ describe RedisIPC::Dispatcher do
 
       before do
         consumer_sampler.each do |consumer|
-          send_to(consumer, dispatcher, content: "Hello #{consumer.name}")
+          send_to(consumer, dispatcher, content: Faker::String.random)
         end
       end
 
@@ -72,13 +82,13 @@ describe RedisIPC::Dispatcher do
         consumers.shuffle.each_with_index do |consumer, index|
           # Using the index to ensure a the proper ordering to check against
           (index + 1).times do
-            send_to(consumer, dispatcher, content: "Hello #{consumer.name}")
+            send_to(consumer, dispatcher, content: Faker::String.random)
           end
         end
       end
 
       it "will pick a consumer with the least amount of pending messages" do
-        consumer = dispatcher.consumer_stats.values.min_by { |c| c["pending"] }
+        consumer = consumer_only_stats(consumer_names).min_by { |c| c["pending"] }
 
         expect(balanced_consumer_name).to eq(consumer["name"])
       end
@@ -89,13 +99,13 @@ describe RedisIPC::Dispatcher do
         consumers.shuffle.each do |consumer|
           sleep(rand / 1000) # We're working with the milliseconds, this doesn't need to delay very long
 
-          send_to(consumer, dispatcher, content: "Hello #{consumer.name}")
+          send_to(consumer, dispatcher, content: Faker::String.random)
         end
       end
 
       it "will pick an active consumer who has idled the longest" do
         # I know all of the consumers have pending messages so I can skip that
-        consumer = dispatcher.consumer_stats.values.min { |a, b| b["idle"] <=> a["idle"] }
+        consumer = consumer_only_stats(consumer_names).min { |a, b| b["idle"] <=> a["idle"] }
 
         expect(balanced_consumer_name).to eq(consumer["name"])
       end
