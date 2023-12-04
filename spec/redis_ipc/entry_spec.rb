@@ -36,4 +36,38 @@ describe RedisIPC::Entry do
       expect(entry.consumer).to eq("consumer")
     end
   end
+
+  describe "#to_h" do
+    subject(:hash) { entry.to_h }
+
+    context "when no id is provided" do
+      it "stores nil for the id" do
+        expect(hash).not_to have_key(:id)
+      end
+    end
+
+    context "when an id is provided" do
+      subject(:entry) { described_class.new(id: "id", group: "group", content: "content") }
+
+      it "stores the id" do
+        expect(hash).to have_key(:id)
+        expect(hash[:id]).to eq("id")
+      end
+    end
+
+    context "when no consumer is provided" do
+      it "stores nil for the consumer" do
+        expect(hash).not_to have_key(:consumer)
+      end
+    end
+
+    context "when a consumer is provided" do
+      subject(:entry) { described_class.new(consumer: "consumer", group: "group", content: "content") }
+
+      it "stores the consumer" do
+        expect(hash).to have_key(:consumer)
+        expect(hash[:consumer]).to eq("consumer")
+      end
+    end
+  end
 end
