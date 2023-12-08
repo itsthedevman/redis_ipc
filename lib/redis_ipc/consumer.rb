@@ -23,8 +23,8 @@ module RedisIPC
       @task = Concurrent::TimerTask.new(execution_interval: @options[:execution_interval]) { process_next_message }
     end
 
-    def stop_listening
-      @task.shutdown
+    def acknowledge(id)
+      redis.xack(stream_name, group_name, id)
     end
 
     def listen
@@ -33,8 +33,8 @@ module RedisIPC
       @task
     end
 
-    def acknowledge(id)
-      redis.xack(stream_name, group_name, id)
+    def stop_listening
+      @task.shutdown
     end
 
     private

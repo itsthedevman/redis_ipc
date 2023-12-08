@@ -7,7 +7,7 @@ module RedisIPC
       timeout: 5 # Seconds
     }.freeze
 
-    def initialize(stream_name, options:, redis_options:)
+    def initialize(stream_name, options: {}, redis_options: {})
       @stream_name = stream_name
       @options = OPTIONS.merge(options)
 
