@@ -8,7 +8,7 @@ module RedisIPC
     class_attribute :on_message
     class_attribute :on_error
 
-    def initialize(stream, group: nil)
+    def initialize(stream, group:)
       self.stream_name = stream
       self.group_name = group
     end
@@ -18,7 +18,12 @@ module RedisIPC
       raise ConfigurationError, "Stream#on_error must be a lambda or proc" unless on_error.is_a?(Proc)
 
       redis_options = RedisIPC::DEFAULTS.merge(redis_options)
-      @sender = Sender.new(stream_name, options: options.fetch(:sender, {}), redis_options: redis_options)
+
+      @sender = Sender.new(
+        stream_name, group_name,
+        options: options.fetch(:sender, {}),
+        redis_options: redis_options
+      )
 
       @consumer_names, @consumer_pool = create_consumers(options.fetch(:consumer, {}), redis_options)
       @dispatcher_pool = create_dispatchers(options.fetch(:dispatcher, {}), redis_options)
@@ -40,7 +45,7 @@ module RedisIPC
 
       promise = Concurrent::Promise.execute do
         @consumer_pool.with do |consumer|
-          @sender.send_with(consumer, destination_group: to, content: content)
+          @sender.send_with(consumer, content: content, destination_group: to)
         end
       end
 
@@ -66,7 +71,14 @@ module RedisIPC
       consumer_pool = ConnectionPool.new(size: pool_size) do
         consumer_name = name_enumerator.next
 
-        consumer = Consumer.new(consumer_name, group: group_name, options: options, redis_options: redis_options)
+        consumer = Consumer.new(
+          consumer_name,
+          stream: stream_name,
+          group: group_name,
+          options: options,
+          redis_options: redis_options
+        )
+
         consumer.add_observer(self, :process_inbound_message)
         consumer.listen
 
@@ -87,10 +99,13 @@ module RedisIPC
       ConnectionPool.new(size: pool_size) do
         dispatcher_name = name_enumerator.next
 
-        dispatcher = Dispatcher.new(dispatcher_name, @consumer_names,
+        dispatcher = Dispatcher.new(
+          dispatcher_name, @consumer_names,
+          stream: stream_name,
           group: group_name,
           options: options[:dispatchers],
-          redis_options: redis_options)
+          redis_options: redis_options
+        )
 
         dispatcher.listen
         dispatcher
@@ -100,7 +115,7 @@ module RedisIPC
     def process_inbound_message(_, entry, exception)
       # This ensures any consumer can be listening for a specific message but also be processing other messages
       # while waiting since inbound messages that are not responses will always have a consumer that isn't one of ours
-      return if @consumer_names.include?(entry.consumer)
+      return if @consumer_names.include?(entry.return_to_consumer)
 
       if exception
         on_error.call(entry, exception)

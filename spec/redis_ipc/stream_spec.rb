@@ -56,8 +56,21 @@ describe RedisIPC::Stream do
   describe "#disconnect"
 
   describe "Sending/Receiving" do
+    subject(:other_stream) do
+      stream = RedisIPC::Stream.new(stream_name, group: "other_group")
+      stream.on_error = -> {}
+
+      stream.on_message = lambda do |entry|
+        stream.send(content: entry.for_response(content: "#{entry.content} back"))
+      end
+
+      stream.connect
+      stream
+    end
+
     context "when a message is sent" do
-      it "TODO"
+      it "receives the message" do
+      end
     end
   end
 end

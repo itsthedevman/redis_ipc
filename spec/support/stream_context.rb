@@ -36,8 +36,17 @@ RSpec.shared_context("stream") do
   end
 
   def add_to_stream(consumer = nil, content:)
-    entry = RedisIPC::Entry.new(consumer: consumer, group: group_name, content: content)
-    redis.xadd(stream_name, entry.to_h)
+    entry = RedisIPC::Entry.new(
+      return_to_consumer: consumer,
+      source_group: group_name,
+      destination_group: group_name,
+      content: content
+    )
+
+    id = redis.xadd(stream_name, entry.to_h)
+    redis.set(RedisIPC.ledger_key(stream_name, id), "", ex: 2)
+
+    id
   end
 
   def send_to(consumer, dispatcher = nil, content:)
@@ -50,7 +59,7 @@ RSpec.shared_context("stream") do
   end
 
   def send_and_wait!(consumer, content:, ack: false)
-    add_entry_to_stream(consumer, content: content)
+    add_to_stream(consumer, content: content)
     wait_for_response!(consumer, ack: ack)
   end
 
@@ -64,11 +73,16 @@ RSpec.shared_context("stream") do
 
     task = consumer.listen
 
-    while task.running?
+    count = 0
+    while task.running? && count < 20 # 2 seconds
       sleep(0.1)
+      count += 1
     end
 
+    # Cleanup
+    consumer.stop_listening if task.running?
     consumer.delete_observer(observer)
+
     return if response.nil?
     raise response if response.is_a?(Exception)
 

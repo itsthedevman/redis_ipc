@@ -7,32 +7,54 @@ module RedisIPC
       timeout: 5 # Seconds
     }.freeze
 
-    def initialize(stream_name, options: {}, redis_options: {})
+    attr_reader :stream_name, :group_name, :options
+
+    def initialize(stream_name, group_name, options: {}, redis_options: {})
       @stream_name = stream_name
+      @group_name = group_name
       @options = OPTIONS.merge(options)
 
-      @redis_pool = ConnectionPool.new(size: @options[:pool_size]) do
+      @redis_pool = ConnectionPool.new(size: self.options[:pool_size]) do
         Redis.new(**redis_options)
       end
     end
 
     def send_with(consumer, destination_group:, content:)
-      entry_id = post_to_stream(destination_group, content)
+      entry = Entry.new(
+        content: content,
+        source_group: group_name,
+        destination_group: destination_group,
+        return_to_consumer: consumer.name
+      )
+
+      entry_id = post_to_stream(entry)
       response = wait_for_response(consumer, entry_id)
 
       # Failed to get a message back
-      raise TimeoutError if response == MVar::TIMEOUT
+      raise TimeoutError if response == Concurrent::MVar::TIMEOUT
 
       response
     end
 
+    def respond(entry)
+      post_to_stream(entry, with_ledger: false)
+    end
+
     private
 
-    def post_to_stream(consumer, destination_group, content)
-      entry = Entry.new(consumer: consumer.name, group: destination_group, content: content)
-
+    def post_to_stream(entry, with_ledger: true)
       @redis_pool.with do |redis|
-        redis.xadd(@stream_name, entry.to_h)
+        id = redis.xadd(stream_name, entry.to_h)
+
+        # Creates an "entry" in the ledger.
+        # All this does at this moment is track if the message is active (key exists) or expired (key does not exist)
+        if with_ledger
+          ledger_key = RedisIPC.ledger_key(stream_name, id)
+          redis.set(ledger_key, "", ex: options[:timeout])
+          puts "KEY: #{ledger_key}. ALL: #{redis.keys}"
+        end
+
+        id
       end
     end
 
@@ -53,7 +75,7 @@ module RedisIPC
 
         # The observer holds onto a MVar that stores the message
         # This blocks until the message comes back or timeout is returned
-        result = response.take(@options[:timeout])
+        result = response.take(options[:timeout])
 
         # Ensure this observer is removed so it doesn't keep processing
         consumer.delete_observer(observer)

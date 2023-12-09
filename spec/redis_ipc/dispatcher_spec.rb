@@ -22,6 +22,16 @@ describe RedisIPC::Dispatcher do
     expect(dispatcher.name).to eq("test_dispatcher")
   end
 
+  context "when created without a stream name" do
+    subject(:dispatcher) { described_class.new("test_dispatcher", [], stream: "", group: group_name) }
+
+    it "raises an exception with a different class name to Consumer" do
+      expect { dispatcher }.to raise_error(
+        ArgumentError, "Dispatcher test_dispatcher was created without a stream name"
+      )
+    end
+  end
+
   describe "#listen" do
     context "when data is first received by the group" do
       it "reads in the data as an Entry and assigns it to the least busy consumer" do

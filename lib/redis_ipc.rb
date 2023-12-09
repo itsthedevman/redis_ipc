@@ -13,7 +13,6 @@ require "connection_pool"
 require "json"
 require "redis"
 
-
 module RedisIPC
   DEFAULTS = {
     host: ENV.fetch("REDIS_HOST", "localhost"),
@@ -30,6 +29,10 @@ module RedisIPC
 
   class << self
     attr_accessor :logger
+
+    def ledger_key(stream_name, id)
+      "#{stream_name}:ledger:#{id}"
+    end
   end
 end
 
