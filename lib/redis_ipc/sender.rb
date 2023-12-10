@@ -13,6 +13,7 @@ module RedisIPC
       @stream_name = stream_name
       @group_name = group_name
       @options = OPTIONS.merge(options)
+      @ledger = Ledger.new(timeout: self.options[:timeout])
 
       @redis_pool = ConnectionPool.new(size: self.options[:pool_size]) do
         Redis.new(**redis_options)
@@ -20,41 +21,28 @@ module RedisIPC
     end
 
     def send_with(consumer, destination_group:, content:)
-      entry = Entry.new(
-        content: content,
-        source_group: group_name,
-        destination_group: destination_group,
-        return_to_consumer: consumer.name
-      )
+      id = post_to_stream(content: content, destination_group: destination_group)
 
-      entry_id = post_to_stream(entry)
-      response = wait_for_response(consumer, entry_id)
+      ledger.add(id, consumer.name)
+      response = wait_for_response(consumer, id)
 
       # Failed to get a message back
       raise TimeoutError if response == Concurrent::MVar::TIMEOUT
+      raise response if response.is_a?(StandardError)
 
       response
     end
 
     def respond(entry)
-      post_to_stream(entry, with_ledger: false)
+      post_to_stream(entry)
     end
 
     private
 
-    def post_to_stream(entry, with_ledger: true)
+    def post_to_stream(content:, destination_group:)
       @redis_pool.with do |redis|
-        id = redis.xadd(stream_name, entry.to_h)
-
-        # Creates an "entry" in the ledger.
-        # All this does at this moment is track if the message is active (key exists) or expired (key does not exist)
-        if with_ledger
-          ledger_key = RedisIPC.ledger_key(stream_name, id)
-          redis.set(ledger_key, "", ex: options[:timeout])
-          puts "KEY: #{ledger_key}. ALL: #{redis.keys}"
-        end
-
-        id
+        # Using Entry to ensure message structure, instead of using a hash directly
+        redis.xadd(stream_name, Entry.new(content: content, destination_group: destination_group).to_h)
       end
     end
 
@@ -66,11 +54,10 @@ module RedisIPC
         response = Concurrent::MVar.new
 
         observer = consumer.add_observer do |_, entry, exception|
-          raise exception if exception
           next unless entry.id == waiting_for_id
 
           consumer.acknowledge(waiting_for_id)
-          response.put(entry.content)
+          response.put(exception || entry.content)
         end
 
         # The observer holds onto a MVar that stores the message

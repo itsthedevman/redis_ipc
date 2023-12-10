@@ -6,6 +6,7 @@ require "active_support/core_ext/class/attribute"
 require "active_support/core_ext/enumerable"
 require "active_support/core_ext/hash/indifferent_access"
 require "active_support/core_ext/module/delegation"
+require "active_support/core_ext/numeric/time"
 require "active_support/core_ext/object/blank"
 require "active_support/core_ext/string/inflections"
 require "concurrent"
@@ -29,10 +30,6 @@ module RedisIPC
 
   class << self
     attr_accessor :logger
-
-    def ledger_key(stream_name, id)
-      "#{stream_name}:ledger:#{id}"
-    end
   end
 end
 
@@ -40,6 +37,7 @@ end
   "consumer",
   "dispatcher",
   "entry",
+  "ledger",
   "sender",
   "stream",
   "version"

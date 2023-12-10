@@ -26,13 +26,55 @@ module RedisIPC
       @task = Concurrent::TimerTask.new(execution_interval: @options[:execution_interval]) { process_next_message }
     end
 
+    #
+    # A wrapper for #add_observer that simplifies processing entries by removing the need to having code on every
+    # observer to handle exceptions or not.
+    # If manual exception handling is needed, use #add_observer
+    #
+    # @param callback_type [Symbol] The type of callback to register
+    # @param observer [Object] If a block is not provided, this object will have function called on it
+    # @param function [Symbol] If a block is not provided, this is the method that will be called on the observer
+    # @param &block [Proc] If provided this code will be called as the callback
+    #
+    # @return [Object] The registered observer
+    #
+    def add_callback(callback_type, observer = nil, function = :update, &block)
+      handler = lambda do |data|
+        if block
+          yield(data)
+        else
+          observer.public_send(function, data)
+        end
+      end
+
+      callback =
+        case callback_type
+        # Ignores exceptions and only calls when it's a success
+        when :on_message
+          lambda do |_, entry, exception|
+            next if exception
+
+            handler.call(entry)
+          end
+        # Ignores successful messages and only calls on exceptions
+        when :on_error
+          lambda do |_, entry, exception|
+            next unless exception
+
+            handler.call(exception)
+          end
+        else
+          raise ArgumentError, "Invalid callback type #{callback_type} provided. Expected :on_message, or :on_error"
+        end
+
+      add_observer(&callback)
+    end
+
     def acknowledge(id)
-      remove_from_ledger(id)
       redis.xack(stream_name, group_name, id)
     end
 
     def delete(id)
-      remove_from_ledger(id)
       redis.xdel(stream_name, id)
     end
 
@@ -58,39 +100,18 @@ module RedisIPC
       raise ArgumentError, "#{class_name} #{name} was created without a group name" if group_name.blank?
     end
 
-    def remove_from_ledger(id)
-      redis.del(RedisIPC.ledger_key(stream_name, id))
-    end
-
     def process_next_message
       response = redis.xreadgroup(group_name, name, stream_name, @options[:read_group_id], count: 1)&.values&.flatten
       return if response.blank?
 
-      # Any observers will receive this Entry instance
-      # If no observer reads this message, it will stay in the PEL until timeout
-      entry = Entry.from_redis(*response)
-
-      # When a message is posted to the stream, an entry in the stream ledger is added with EXPIRE
-      # If the key does not exist, the message has expired so do not process it
-      if expired?(entry.id)
-        delete(entry.id)
-        return
-      end
-
-      entry
-    rescue => e
-      RedisIPC.logger&.error(JSON.generate(message: e.message, backtrace: e.backtrace))
-      nil
+      # Pass to any reading observer
+      Entry.from_redis(*response)
     end
 
     def ensure_group_exists
       return if redis.exists?(stream_name)
 
       redis.xgroup(:create, stream_name, group_name, "$", mkstream: true)
-    end
-
-    def expired?(id)
-      !redis.exists?(RedisIPC.ledger_key(stream_name, id))
     end
   end
 end

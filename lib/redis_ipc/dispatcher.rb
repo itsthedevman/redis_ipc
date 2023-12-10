@@ -18,15 +18,8 @@ module RedisIPC
       @consumer_names = consumer_names
       super(name, options: DEFAULTS, **)
 
-      add_observer(self, :process_unread_message)
-    end
-
-    def process_unread_message(_, entry, exception)
-      return unless entry.destination_group == group_name
-      return unless entry.return_to_consumer.nil? || @consumer_names.include?(entry.return_to_consumer)
-
-      consumer_name = entry.return_to_consumer || find_load_balanced_consumer
-      redis.xclaim(stream_name, group_name, consumer_name, 0, entry.id)
+      add_callback(:on_message, self, :handle_message)
+      add_callback(:on_error, self, :handle_exception)
     end
 
     def consumer_stats
@@ -35,7 +28,33 @@ module RedisIPC
         .select { |name, _| @consumer_names.include?(name) }
     end
 
+    def handle_message(entry)
+      return unless accept?(entry)
+
+      consumer_name = entry.dispatch_to_consumer || find_load_balanced_consumer
+      redis.xclaim(stream_name, group_name, consumer_name, 0, entry.id)
+    end
+
+    def handle_exception(exception)
+      # TODO: Write to logger, respond back with rejection message - right?
+    end
+
     private
+
+    def accept?(entry)
+      # Only process messages for our group since all dispatchers receive the same message
+      true if entry.destination_group == group_name
+
+      # Now things get fun. In order to be accepted, an entry must be in one of two "states". Any expired responses
+      #
+      # Request: an entry that was sent to us to process and then respond to.
+      #          These entries must have a status of "pending" and do not exist in the ledger
+      #
+      # Response: an entry that was sent to us in response to an entry we sent to them
+      #           These entries must have a status of "fullfilled" or "rejected" and have an entry in the ledger
+      #
+      # return unless entry.dispatch_to_consumer.nil? || @consumer_names.include?(entry.dispatch_to_consumer)
+    end
 
     #
     # Load balances the consumers and returns the least busiest

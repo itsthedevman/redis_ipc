@@ -61,25 +61,24 @@ module RedisIPC
     private
 
     def create_consumers(options, redis_options)
-      pool_size = options[:pool_size]
-
-      consumer_names = pool_size.times.map { |i| "consumer_#{i}" }
-
       # This is the first time I've had an opportunity to use an Enumerator like this...
+      consumer_names = options[:pool_size].times.map { |i| "consumer_#{i}" }
       name_enumerator = consumer_names.to_enum
 
-      consumer_pool = ConnectionPool.new(size: pool_size) do
+      consumer_pool = ConnectionPool.new(size: options[:pool_size]) do
         consumer_name = name_enumerator.next
 
         consumer = Consumer.new(
           consumer_name,
           stream: stream_name,
           group: group_name,
+          ledger: sender.ledger,
           options: options,
           redis_options: redis_options
         )
 
-        consumer.add_observer(self, :process_inbound_message)
+        consumer.add_callback(:on_message, self, :process_inbound_message)
+        consumer.add_callback(:on_error) { |exception| raise "TODO" }
         consumer.listen
 
         consumer
@@ -89,20 +88,19 @@ module RedisIPC
     end
 
     def create_dispatchers(options, redis_options)
-      pool_size = options[:pool_size]
-
       # Copy pasta. I guess this is now the second time I've used the #to_enum method. lol
-      dispatcher_names = pool_size.times.map { |i| "dispatcher_#{i}" }
+      dispatcher_names = options[:pool_size].times.map { |i| "dispatcher_#{i}" }
       name_enumerator = dispatcher_names.to_enum
 
       # This _didn't_ need to be a ConnectionPool, but I wanted to make it consistent :D
-      ConnectionPool.new(size: pool_size) do
+      ConnectionPool.new(size: options[:pool_size]) do
         dispatcher_name = name_enumerator.next
 
         dispatcher = Dispatcher.new(
           dispatcher_name, @consumer_names,
           stream: stream_name,
           group: group_name,
+          ledger: sender.ledger,
           options: options[:dispatchers],
           redis_options: redis_options
         )

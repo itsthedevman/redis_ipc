@@ -66,7 +66,7 @@ RSpec.shared_context("stream") do
   def wait_for_response!(consumer, ack: true)
     response = nil
 
-    observer = consumer.add_observer do |time, result, exception|
+    observer = consumer.add_observer do |_, result, exception|
       response = exception || result
       consumer.stop_listening
     end

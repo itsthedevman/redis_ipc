@@ -43,7 +43,7 @@ describe RedisIPC::Consumer do
         id = send_to(consumer, content: content)
 
         response = nil
-        consumer.add_observer do |time, result, exception|
+        consumer.add_observer do |_, result, exception|
           response = exception || result
           consumer.stop_listening
         end
@@ -62,6 +62,12 @@ describe RedisIPC::Consumer do
         expect(consumer_info).not_to be_nil
         expect(consumer_info["pending"]).to eq(1)
       end
+    end
+  end
+
+  describe "#add_callback" do
+    it "TODO" do
+      fail!
     end
   end
 end
