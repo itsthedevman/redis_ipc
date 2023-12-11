@@ -2,14 +2,14 @@
 
 module RedisIPC
   class Ledger < Concurrent::Map
-    class Entry < Data.define(:expires_at, :dispatch_to_consumer)
-    end
-
-    def initialize(timeout:, **)
+    def initialize(entry_timeout:, cleanup_interval:, **)
       super(**)
 
-      @timeout_in_seconds = timeout.seconds
-      # Todo: Cleanup task
+      @timeout_in_seconds = entry_timeout.seconds
+      @entry_class = Data.define(:expires_at, :dispatch_to_consumer)
+      @cleanup_task = Concurrent::TimerTask.execute(execution_interval: cleanup_interval) do
+        # TODO
+      end
     end
 
     def key?(id)
@@ -23,7 +23,7 @@ module RedisIPC
     def add(id, consumer_name, expires_at: nil)
       raise ArgumentError, "#{id} is already in the ledger" if key?(id)
 
-      self[id] = Entry.new(
+      self[id] = @entry_class.new(
         expires_at: expires_at || @timeout_in_seconds.from_now,
         dispatch_to_consumer: consumer_name
       )

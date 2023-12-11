@@ -36,7 +36,7 @@ RSpec.shared_context("stream") do
   end
 
   def add_to_stream(consumer = nil, content:)
-    entry = RedisIPC::Entry.new(
+    entry = RedisIPC::Stream::Entry.new(
       return_to_consumer: consumer,
       source_group: group_name,
       destination_group: group_name,
@@ -96,7 +96,7 @@ RSpec.shared_context("stream") do
       group_name,
       consumer.name,
       0,
-      message_or_id.is_a?(RedisIPC::Entry) ? message_or_id.id : message_or_id
+      message_or_id.is_a?(RedisIPC::Stream::Entry) ? message_or_id.id : message_or_id
     )
   end
 end

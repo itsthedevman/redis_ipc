@@ -15,11 +15,6 @@ require "json"
 require "redis"
 
 module RedisIPC
-  DEFAULTS = {
-    host: ENV.fetch("REDIS_HOST", "localhost"),
-    port: ENV.fetch("REDIS_PORT", 6379)
-  }.freeze
-
   class Error < StandardError; end
 
   class TimeoutError < Error; end

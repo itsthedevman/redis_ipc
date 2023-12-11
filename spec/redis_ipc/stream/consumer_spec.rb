@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-describe RedisIPC::Consumer do
+describe RedisIPC::Stream::Consumer do
   include_context "stream"
 
   subject(:consumer) do
@@ -54,7 +54,7 @@ describe RedisIPC::Consumer do
           sleep(0.1)
         end
 
-        expect(response).to be_kind_of(RedisIPC::Entry)
+        expect(response).to be_kind_of(RedisIPC::Stream::Entry)
         expect(response.id).to eq(id)
         expect(response.content).to eq(content)
 

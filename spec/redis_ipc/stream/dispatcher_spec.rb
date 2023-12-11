@@ -5,7 +5,7 @@ describe RedisIPC::Dispatcher do
 
   let!(:consumers) do
     5.times.map do |i|
-      RedisIPC::Consumer.new("test_consumer_#{i}", stream: stream_name, group: group_name)
+      RedisIPC::Stream::Consumer.new("test_consumer_#{i}", stream: stream_name, group: group_name)
     end
   end
 

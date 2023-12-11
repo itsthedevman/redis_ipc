@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-describe RedisIPC::Entry do
+describe RedisIPC::Stream::Entry do
   subject(:entry) do
     described_class.new(destination_group: "destination_group", content: "content")
   end
