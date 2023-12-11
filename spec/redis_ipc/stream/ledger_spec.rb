@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-describe RedisIPC::Ledger do
-  subject(:ledger) { described_class.new(timeout: 3) }
+describe RedisIPC::Stream::Ledger do
+  subject(:ledger) { described_class.new(entry_timeout: 3, cleanup_interval: 1) }
 
   describe "#add" do
     context "when the id is not in the ledger" do
@@ -23,20 +23,6 @@ describe RedisIPC::Ledger do
 
         expect { ledger.add("foo", "another_consumer") }.to raise_error(ArgumentError, "foo is already in the ledger")
       end
-    end
-  end
-
-  describe "#key?" do
-    subject { ledger.key?("foo") }
-
-    context "when the key is in the ledger" do
-      before { ledger.add("foo", "") }
-
-      it { is_expected.to be true }
-    end
-
-    context "when the key is not in the ledger" do
-      it { is_expected.to be false }
     end
   end
 
