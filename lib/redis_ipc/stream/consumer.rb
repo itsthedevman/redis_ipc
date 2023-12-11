@@ -11,7 +11,7 @@ module RedisIPC
 
       attr_reader :name, :stream_name, :group_name, :redis
 
-      delegate :add_observer, :delete_observer, to: :@task
+      delegate :add_observer, :delete_observer, :count_observers, to: :@task
 
       def initialize(name, stream:, group:, options: {}, redis_options: {})
         @name = name
@@ -71,11 +71,8 @@ module RedisIPC
         add_observer(&callback)
       end
 
-      def acknowledge(id)
+      def acknowledge_and_remove(id)
         redis.xack(stream_name, group_name, id)
-      end
-
-      def delete(id)
         redis.xdel(stream_name, id)
       end
 

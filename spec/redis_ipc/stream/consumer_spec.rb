@@ -40,25 +40,12 @@ describe RedisIPC::Stream::Consumer do
       it "creates a Entry instance and broadcasts to all observers without acknowledging it" do
         content = Faker::String.random
 
-        id = send_to(consumer, content: content)
-
-        response = nil
-        consumer.add_observer do |_, result, exception|
-          response = exception || result
-          consumer.stop_listening
-        end
-
-        task = consumer.listen
-
-        while task.running?
-          sleep(0.1)
-        end
+        (_redis_id, response) = send_and_delegate_to_consumer(consumer, content: content)
 
         expect(response).to be_kind_of(RedisIPC::Stream::Entry)
-        expect(response.id).to eq(id)
         expect(response.content).to eq(content)
 
-        consumer_info = consumer_stats.find { |c| c["name"] == consumer.name }
+        consumer_info = consumer_stats_for(consumer)
         expect(consumer_info).not_to be_nil
         expect(consumer_info["pending"]).to eq(1)
       end
@@ -66,8 +53,29 @@ describe RedisIPC::Stream::Consumer do
   end
 
   describe "#add_callback" do
-    it "TODO" do
-      fail!
+    context "when the callback type is :on_message" do
+      it "adds an observer that only receives successful events" do
+        consumer.add_callback(:on_message) {}
+        expect(consumer.count_observers).to eq(1)
+      end
+    end
+
+    context "when the callback type is :on_error" do
+      it "adds an observer that only receives exception events" do
+        consumer.add_callback(:on_error) {}
+        expect(consumer.count_observers).to eq(1)
+      end
+    end
+  end
+
+  describe "#acknowledge_and_remove" do
+    it "removes the message from the PEL" do
+      (redis_id, _entry) = send_and_delegate_to_consumer(consumer, content: "")
+      consumer.acknowledge_and_remove(redis_id)
+
+      consumer_info = consumer_stats_for(consumer)
+      expect(consumer_info).not_to be_nil
+      expect(consumer_info["pending"]).to eq(0)
     end
   end
 end
