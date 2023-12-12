@@ -13,6 +13,17 @@ module RedisIPC
 
       delegate :add_observer, :delete_observer, :count_observers, to: :@task
 
+      #
+      # Creates a new Consumer for the given stream.
+      # This class is configured to read from its own Pending Entries List by default. This means that
+      # this class cannot read messages without them being claimed by this consumer. See Dispatcher
+      #
+      # @param name [String] The unique name for this consumer to be used in Redis
+      # @param stream [String] The name of the Redis Stream
+      # @param group [String] The name of the group in the Stream
+      # @param options [Hash] Configuration values for the Consumer. See Consumer::DEFAULTS
+      # @param redis_options [Hash] The Redis options to be passed into the client. See Stream::REDIS_DEFAULTS
+      #
       def initialize(name, stream:, group:, options: {}, redis_options: {})
         @name = name
         @stream_name = stream
@@ -24,7 +35,7 @@ module RedisIPC
         @redis = Redis.new(redis_options)
 
         # This is the workhorse for the consumer
-        @task = Concurrent::TimerTask.new(execution_interval: @options[:execution_interval]) { process_next_message }
+        @task = Concurrent::TimerTask.new(execution_interval: @options[:execution_interval]) { handle_message }
       end
 
       #
@@ -71,11 +82,29 @@ module RedisIPC
         add_observer(&callback)
       end
 
+      #
+      # Attempts to acknowledge and remove the given Redis message ID from the stream
+      #
+      # @param id [String] The Redis message ID
+      #
       def acknowledge_and_remove(id)
-        redis.xack(stream_name, group_name, id)
-        redis.xdel(stream_name, id)
+        # Some of the worst code I've ever written, but I want to make real sure that the message has been removed lol
+        begin
+          redis.xack(stream_name, group_name, id)
+        rescue Redis::CommandError
+        end
+
+        begin
+          redis.xdel(stream_name, id)
+        rescue Redis::CommandError
+        end
+
+        nil
       end
 
+      #
+      # Starts checking the stream for new messages
+      #
       def listen
         return if @task.running?
 
@@ -84,6 +113,9 @@ module RedisIPC
         @task
       end
 
+      #
+      # Stops checking the stream for new messages
+      #
       def stop_listening
         @task.shutdown
       end
@@ -98,7 +130,13 @@ module RedisIPC
         raise ArgumentError, "#{class_name} #{name} was created without a group name" if group_name.blank?
       end
 
-      def process_next_message
+      #
+      # Reads the latest messages from the PEL (if a consumer) or the group (if a dispatcher)
+      # Message entries are then passed to any observers currently registered with the consumer
+      #
+      # This method does not acknowledge the message in the stream. This must be handled by an observer
+      #
+      def handle_message
         response = redis.xreadgroup(
           group_name, name, stream_name,
           # The ID to read, including special IDs ">".
