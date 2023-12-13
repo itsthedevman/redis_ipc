@@ -13,7 +13,7 @@ RSpec.shared_context("stream") do
   end
 
   def redis
-    @redis ||= Redis.new(**RedisIPC::DEFAULTS)
+    @redis ||= Redis.new(**RedisIPC::Stream::REDIS_DEFAULTS)
   end
 
   def consumer_stats
@@ -22,6 +22,10 @@ RSpec.shared_context("stream") do
 
   def consumer_only_stats(consumer_names)
     consumer_stats.select { |c| consumer_names.include?(c["name"]) }
+  end
+
+  def consumer_stats_for(consumer)
+    consumer_stats.find { |c| c["name"] == consumer.name }
   end
 
   def create_stream
@@ -35,38 +39,28 @@ RSpec.shared_context("stream") do
     redis.del(stream_name)
   end
 
-  def add_to_stream(consumer = nil, content:)
+  def add_to_stream(entry)
+    redis.xadd(stream_name, entry.to_h)
+  end
+
+  def send_and_delegate_to_consumer(consumer, dispatcher = nil, content:)
     entry = RedisIPC::Stream::Entry.new(
-      return_to_consumer: consumer,
+      content: content,
       source_group: group_name,
-      destination_group: group_name,
-      content: content
+      destination_group: consumer.group_name
     )
 
-    id = redis.xadd(stream_name, entry.to_h)
-    redis.set(RedisIPC.ledger_key(stream_name, id), "", ex: 2)
-
-    id
-  end
-
-  def send_to(consumer, dispatcher = nil, content:)
-    id = add_to_stream(content: content)
-
+    id = add_to_stream(entry)
     redis.xreadgroup(group_name, dispatcher&.name || "auto_dispatcher", stream_name, ">", count: 1)
-    assign_message_to(consumer, id)
+    redis.xclaim(stream_name, group_name, consumer.name, 0, id)
 
-    id
-  end
-
-  def send_and_wait!(consumer, content:, ack: false)
-    add_to_stream(consumer, content: content)
-    wait_for_response!(consumer, ack: ack)
+    [id, entry]
   end
 
   def wait_for_response!(consumer, ack: true)
     response = nil
 
-    observer = consumer.add_observer do |_, result, exception|
+    observer = consumer.add_observer do |_, (id, result), exception|
       response = exception || result
       consumer.stop_listening
     end
@@ -86,17 +80,7 @@ RSpec.shared_context("stream") do
     return if response.nil?
     raise response if response.is_a?(Exception)
 
-    consumer.acknowledge(response.id) if ack
+    consumer.acknowledge_and_remove(response.id) if ack
     response
-  end
-
-  def assign_message_to(consumer, message_or_id)
-    redis.xclaim(
-      stream_name,
-      group_name,
-      consumer.name,
-      0,
-      message_or_id.is_a?(RedisIPC::Stream::Entry) ? message_or_id.id : message_or_id
-    )
   end
 end

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-describe RedisIPC::Dispatcher do
+describe RedisIPC::Stream::Dispatcher do
   include_context "stream"
 
   let!(:consumers) do
@@ -35,14 +35,21 @@ describe RedisIPC::Dispatcher do
   describe "#listen" do
     context "when data is first received by the group" do
       it "reads in the data as an Entry and assigns it to the least busy consumer" do
-        add_to_stream(content: Faker::String.random)
+        entry = RedisIPC::Stream::Entry.new(
+          content: "Hello",
+          source_group: group_name,
+          destination_group: group_name
+        )
 
+        add_to_stream(entry)
         expect(consumer_stats).to be_empty
+        expect(redis.xlen(stream_name)).to eq(1)
 
         dispatcher.listen
         sleep(rand)
         dispatcher.stop_listening
 
+        expect(redis.xlen(stream_name)).to eq(1)
         expect(consumer_stats).to include(hash_including("name" => "test_consumer_0", "pending" => 1))
       end
     end
@@ -71,7 +78,7 @@ describe RedisIPC::Dispatcher do
 
       before do
         consumer_sampler.each do |consumer|
-          send_to(consumer, dispatcher, content: Faker::String.random)
+          send_and_delegate_to_consumer(consumer, dispatcher, content: Faker::String.random)
         end
       end
 
@@ -86,7 +93,7 @@ describe RedisIPC::Dispatcher do
         consumers.shuffle.each_with_index do |consumer, index|
           # Using the index to ensure a the proper ordering to check against
           (index + 1).times do
-            send_to(consumer, dispatcher, content: Faker::String.random)
+            send_and_delegate_to_consumer(consumer, dispatcher, content: Faker::String.random)
           end
         end
       end
@@ -103,7 +110,7 @@ describe RedisIPC::Dispatcher do
         consumers.shuffle.each do |consumer|
           sleep(rand / 1000) # We're working with the milliseconds, this doesn't need to delay very long
 
-          send_to(consumer, dispatcher, content: Faker::String.random)
+          send_and_delegate_to_consumer(consumer, dispatcher, content: Faker::String.random)
         end
       end
 
@@ -114,5 +121,19 @@ describe RedisIPC::Dispatcher do
         expect(balanced_consumer_name).to eq(consumer["name"])
       end
     end
+  end
+
+  describe "#accept?" do
+    # A request is a entry that was sent to the group for processing by our consumers.
+    # This entry is not in response to a previous request sent out by us
+    context "when the inbound entry is a Request" do
+
+    end
+
+    # Entry received is in response to a previous request sent out from our sender.
+    context "when the inbound entry is a Response"
+
+    # Entry received is in response to a previous request but failed to reply back in time.
+    context "when the inbound entry is expired"
   end
 end

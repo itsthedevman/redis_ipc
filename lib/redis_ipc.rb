@@ -29,11 +29,11 @@ module RedisIPC
 end
 
 [
-  "consumer",
-  "dispatcher",
-  "entry",
-  "ledger",
-  "sender",
   "stream",
+  "stream/consumer",
+  "stream/dispatcher",
+  "stream/entry",
+  "stream/ledger",
+  "stream/ledger/consumer",
   "version"
 ].each { |m| require_relative "./redis_ipc/#{m}" }

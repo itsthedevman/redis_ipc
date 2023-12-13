@@ -5,7 +5,7 @@ module RedisIPC
     OPTION_DEFAULTS = {
       pool_size: 10, # Number of connections for sending
       entry_timeout: 5, # Seconds
-      cleanup_interval: 0.1 # Seconds
+      cleanup_interval: 1 # Seconds
     }.freeze
 
     REDIS_DEFAULTS = {
@@ -19,7 +19,7 @@ module RedisIPC
     class_attribute :on_message
     class_attribute :on_error
 
-    def initialize(stream, group:)
+    def initialize(stream, group)
       self.stream_name = stream
       self.group_name = group
     end
@@ -27,23 +27,36 @@ module RedisIPC
     def connect(options: {}, redis_options: {})
       validate!
 
-      options = OPTION_DEFAULTS.merge(options)
-      redis_options = REDIS_DEFAULTS.merge(redis_options)
+      RedisIPC.logger&.debug { "Connecting to stream '#{stream_name}' and group '#{group_name}'" }
 
-      @ledger = Ledger.new(**options.slice(:entry_timeout, :cleanup_interval))
-      @redis_pool = ConnectionPool.new(size: options[:pool_size]) { Redis.new(**redis_options) }
+      @options = OPTION_DEFAULTS.merge(options)
+      @redis_options = REDIS_DEFAULTS.merge(redis_options)
 
-      @consumer_names, @consumer_pool = create_consumers(options.fetch(:consumer, {}), redis_options)
-      @dispatcher_pool = create_dispatchers(options.fetch(:dispatcher, {}), redis_options)
+      @ledger = Ledger.new(**@options.slice(:entry_timeout, :cleanup_interval))
+      @redis_pool = ConnectionPool.new(size: @options[:pool_size]) { Redis.new(**@redis_options) }
+
+      @consumer_names, @consumer_pool = create_consumers
+      @dispatcher_pool = create_dispatchers
+
+      RedisIPC.logger&.debug {
+        "Connected to stream '#{stream_name}' and group '#{group_name}' with #{@consumer_pool.size} consumers and #{@dispatcher_pool.size} dispatchers"
+      }
 
       self
     end
 
     def disconnect
+      RedisIPC.logger&.debug {
+        "Disconnecting from stream '#{stream_name}' and group '#{group_name}'"
+      }
+
       @consumer_pool.shutdown(&:stop_listening)
       @dispatcher_pool.shutdown(&:stop_listening)
       @redis_pool.shutdown(&:close)
 
+      @options = nil
+      @consumer_names = []
+      @redis_options = nil
       @ledger = nil
       @consumer_pool = nil
       @dispatcher_pool = nil
@@ -58,7 +71,7 @@ module RedisIPC
       end
 
       # Using a Promise because of the functionality it provides which simplifies this code
-      promise = Concurrent::Promise.execute { send_and_wait(content, to) }
+      promise = Concurrent::Promise.execute { track_and_send(content, to) }
 
       # Wait for us to get a message back, or timeout
       promise.wait
@@ -70,24 +83,46 @@ module RedisIPC
     end
 
     #
+    # A wrapper for #send, used response to an inbound entry (to:) using the provided content (with:)
+    # This method is non-blocking. Any further calls will result in new messages being sent
+    # to the source group and immediately dropped
+    #
+    # @param to [RedisIPC::Stream::Entry] The entry that we are responding to
+    # @param with [Any] Provided data will be added as content on the entry
+    #
+    def respond_to(entry:, content:, status: "fulfilled")
+      if @ledger.nil?
+        raise ConnectionError, "Stream has not been set up correctly. Please call Stream#connect first"
+      end
+
+      entry = entry.with(
+        content: content,
+        status: status,
+        source_group: group_name,
+        destination_group: entry.source_group
+      )
+
+      add_to_stream(entry)
+      nil
+    end
+
+    #
     # @private
     #
-    def handle_inbound_messages(_completed_at, entry, exception)
-      # This ensures any consumer can be listening for a specific message but also be processing other messages
-      # while waiting since inbound messages that are not responses will always have a consumer that isn't one of ours
-      return if @consumer_names.include?(entry.return_to_consumer)
+    def handle_message(redis_id, entry)
+      return if @ledger[entry.id]
 
-      # My brain wants this to be the other way around, but I refuse to use unless with a block
-      if exception
-        on_error.call(entry, exception)
-      else
-        on_message.call(entry)
-      end
+      on_message.call(entry)
+    ensure
+      # Acknowledged that we received the ID to remove it from the PEL
+      @consumer_pool.with { |c| c.acknowledge_and_remove(redis_id) }
+    end
 
-      # Acknowledge we processed the request
-      @consumer_pool.with do |consumer|
-        consumer.acknowledge(entry.id)
-      end
+    #
+    # @private
+    #
+    def handle_exception(exception)
+      on_error.call(exception)
     end
 
     private
@@ -98,102 +133,127 @@ module RedisIPC
       raise ConnectionError, "Stream is already connected" if @ledger
     end
 
-    def create_consumers(options, redis_options)
-      # This is the first time I've had an opportunity to use an Enumerator like this...
-      consumer_names = options[:pool_size].times.map { |i| "consumer_#{i}" }
-      name_enumerator = consumer_names.to_enum
+    def create_consumers
+      options = @options.fetch(:consumer, Consumer::DEFAULTS)
+      pool_size = options[:pool_size]
 
-      consumer_pool = ConnectionPool.new(size: options[:pool_size]) do
-        consumer_name = name_enumerator.next
+      consumer_names = pool_size.times.map { |i| "consumer_#{i}" }
+      consumer_name_pool = Concurrent::Array.new(consumer_names)
 
-        consumer = LedgerConsumer.new(
-          consumer_name,
+      consumer_pool = ConnectionPool.new(size: pool_size) do
+        consumer = Ledger::Consumer.new(
+          consumer_name_pool.shift,
           stream: stream_name,
           group: group_name,
           ledger: @ledger,
           options: options,
-          redis_options: redis_options
+          redis_options: @redis_options
         )
 
-        consumer.add_observer(self, :handle_inbound_messages)
-        consumer.listen
+        consumer.add_callback(:on_message, self, :handle_message)
 
+        consumer.listen
         consumer
       end
+
+      # Forces the connection pool to eager load every consumer
+      fill_pool(consumer_pool, pool_size)
 
       [consumer_names, consumer_pool]
     end
 
-    def create_dispatchers(options, redis_options)
-      # Copy pasta. I guess this is now the second time I've used the #to_enum method. lol
-      dispatcher_names = options[:pool_size].times.map { |i| "dispatcher_#{i}" }
-      name_enumerator = dispatcher_names.to_enum
+    def create_dispatchers
+      options = @options.fetch(:dispatcher, Dispatcher::DEFAULTS)
+      pool_size = options[:pool_size]
+
+      dispatcher_names = pool_size.times.map { |i| "dispatcher_#{i}" }
+      dispatcher_name_pool = Concurrent::Array.new(dispatcher_names)
 
       # This _didn't_ need to be a ConnectionPool, but I wanted to make it consistent :D
-      ConnectionPool.new(size: options[:pool_size]) do
-        dispatcher_name = name_enumerator.next
-
+      dispatcher_pool = ConnectionPool.new(size: pool_size) do
         dispatcher = Dispatcher.new(
-          dispatcher_name, @consumer_names,
+          dispatcher_name_pool.shift,
+          @consumer_names,
           stream: stream_name,
           group: group_name,
           ledger: @ledger,
-          options: options[:dispatchers],
-          redis_options: redis_options
+          options: options,
+          redis_options: @redis_options
         )
 
         dispatcher.listen
         dispatcher
       end
+
+      # Force the connection pool to eager load every dispatcher
+      fill_pool(dispatcher_pool, pool_size)
+
+      dispatcher_pool
     end
 
-    def send_and_wait(content, destination_group)
+    def add_to_stream(entry)
+      RedisIPC.logger&.debug { "Adding entry to stream #{stream_name}: #{entry.to_h}" }
+
+      @redis_pool.with { |redis| redis.xadd(stream_name, entry.to_h) }
+    end
+
+    def track_and_send(content, destination_group)
+      entry = Entry.new(
+        content: content,
+        source_group: group_name,
+        destination_group: destination_group
+      )
+
       @consumer_pool.with do |consumer|
-        id = post_to_stream(content: content, destination_group: to)
-        response = wait_for_response(id, consumer)
+        # Track the message for expiration and ensuring it is returned to our consumer
+        @ledger.add(entry.id, consumer.name)
 
-        # Failed to get a message back
-        raise TimeoutError if response == Concurrent::MVar::TIMEOUT
-        raise response if response.is_a?(StandardError)
-
-        response
+        add_to_stream(entry)
+        wait_for_fulfillment(entry.id, consumer)
+      ensure
+        @ledger.delete(entry.id)
       end
     end
 
-    def post_to_stream(content:, destination_group:)
-      @redis_pool.with do |redis|
-        # Using Entry to ensure message structure, instead of using a hash directly
-        redis.xadd(
-          stream_name,
-          Entry.new(content: content, destination_group: destination_group).to_h
-        )
+    def wait_for_fulfillment(waiting_for_entry_id, consumer)
+      # (Pls correct me if I'm wrong) I don't believe this needs to be a thread-safe variable in this context
+      # However, by using MVar I get waiting and timeout support, plus the thread-safety, out of the box.
+      # Win win in my book
+      response = Concurrent::MVar.new
+
+      observer = consumer.add_observer do |_, (_redis_id, entry), exception|
+        next unless entry.id == waiting_for_entry_id
+
+        response.put(exception || entry.content)
       end
-    end
 
-    def wait_for_response(waiting_for_id, consumer)
-      @ledger.add(waiting_for_id, consumer.name)
-
-      @redis_pool.with do |redis|
-        # (Pls correct me if I'm wrong) I don't believe this needs to be a thread-safe variable in this context
-        # However, by using MVar I get waiting and timeout support, plus the thread-safety, out of the box.
-        # Win win in my book
-        response = Concurrent::MVar.new
-
-        observer = consumer.add_observer do |_, entry, exception|
-          next unless entry.id == waiting_for_id
-
-          consumer.acknowledge(waiting_for_id)
-          response.put(exception || entry.content)
-        end
-
-        # The observer holds onto a MVar that stores the message
-        # This blocks until the message comes back or timeout is returned
-        result = response.take(options[:timeout])
-
-        # Ensure this observer is removed so it doesn't keep processing
-        consumer.delete_observer(observer)
-
+      # The observer holds onto a MVar that stores the message
+      # This blocks until the message comes back or timeout is returned
+      case (result = response.take(@options[:entry_timeout]))
+      when Concurrent::MVar::TIMEOUT
+        raise TimeoutError
+      when StandardError
+        raise result
+      else
         result
+      end
+    ensure
+      # Remove the observer so it stops processing messages
+      consumer.delete_observer(observer)
+
+      # Acknowledged that we received the ID to remove it from the PEL
+      consumer.acknowledge_and_remove(waiting_for_entry_id)
+    end
+
+    #
+    # This code is so dirty. I feel dirty for writing this code
+    # But questionable decisions aside, this is how I'm forcing the connection pool to fill the
+    # available connections without waiting for it to lazy load them
+    #
+    def fill_pool(pool, pool_size)
+      pool.instance_exec(pool_size) do |pool_size|
+        consumers = pool_size.times.map { @available.pop(@timeout) }
+        consumers.each { |c| @available.push(c) }
       end
     end
   end

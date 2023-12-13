@@ -28,6 +28,7 @@ module RedisIPC
         @name = name
         @stream_name = stream
         @group_name = group
+        @type = self.class.name.demodulize
 
         validate!
 
@@ -110,6 +111,11 @@ module RedisIPC
 
         ensure_group_exists
         @task.execute
+
+        RedisIPC.logger&.debug {
+          "#{@type} '#{name}' is listening on stream '#{stream_name}' and group '#{group_name}'"
+        }
+
         @task
       end
 
@@ -117,17 +123,16 @@ module RedisIPC
       # Stops checking the stream for new messages
       #
       def stop_listening
+        RedisIPC.logger&.debug { "#{@type} '#{name}' has stopped listening" }
         @task.shutdown
       end
 
       private
 
       def validate!
-        class_name = self.class.name.demodulize
-
-        raise ArgumentError, "#{class_name} was created without a name" if name.blank?
-        raise ArgumentError, "#{class_name} #{name} was created without a stream name" if stream_name.blank?
-        raise ArgumentError, "#{class_name} #{name} was created without a group name" if group_name.blank?
+        raise ArgumentError, "#{@type} was created without a name" if name.blank?
+        raise ArgumentError, "#{@type} #{name} was created without a stream name" if stream_name.blank?
+        raise ArgumentError, "#{@type} #{name} was created without a group name" if group_name.blank?
       end
 
       #
@@ -148,6 +153,7 @@ module RedisIPC
           count: 1
         )&.values&.flatten
 
+        RedisIPC.logger&.debug { "#{@type} '#{name}' received a new message: #{response}" }
         return if response.blank?
 
         # Pass to any reading observer
