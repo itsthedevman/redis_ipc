@@ -67,15 +67,4 @@ describe RedisIPC::Stream::Consumer do
       end
     end
   end
-
-  describe "#acknowledge_and_remove" do
-    it "removes the message from the PEL" do
-      (redis_id, _entry) = send_and_delegate_to_consumer(consumer, content: "")
-      consumer.acknowledge_and_remove(redis_id)
-
-      consumer_info = consumer_stats_for(consumer)
-      expect(consumer_info).not_to be_nil
-      expect(consumer_info["pending"]).to eq(0)
-    end
-  end
 end

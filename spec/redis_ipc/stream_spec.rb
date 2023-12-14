@@ -36,8 +36,8 @@ describe RedisIPC::Stream do
     end
 
     context "when additional options is provided" do
-      let(:consumer_pool) { stream.instance_variable_get(:@consumer_pool) }
-      let(:dispatcher_pool) { stream.instance_variable_get(:@dispatcher_pool) }
+      let(:consumers) { stream.instance_variable_get(:@consumers) }
+      let(:dispatchers) { stream.instance_variable_get(:@dispatchers) }
 
       it "uses those values" do
         options = {
@@ -47,8 +47,8 @@ describe RedisIPC::Stream do
 
         stream.connect(options: options)
 
-        expect(consumer_pool.size).to eq(3)
-        expect(dispatcher_pool.size).to eq(2)
+        expect(consumers.size).to eq(3)
+        expect(dispatchers.size).to eq(2)
       end
     end
   end

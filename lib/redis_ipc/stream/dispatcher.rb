@@ -20,52 +20,39 @@ module RedisIPC
 
         @consumer_names = consumer_names
         @ledger = ledger
-
-        add_callback(:on_message, self, :handle_message)
-        # add_callback(:on_error, self, :handle_exception)
       end
 
       def consumer_stats
-        redis.xinfo(:consumers, stream_name, group_name)
+        @redis.consumer_info
           .index_by { |consumer| consumer["name"] }
           .select { |name, _| @consumer_names.include?(name) }
       end
 
-      #
-      # There are currently three "types" of entries that this method receives.
-      #
-      #   1. Request: Sent to the group for processing by our consumers. This entry is not in response to a previous
-      #         request sent out by our sender.
-      #         These entries must have a status of "pending" and must not exist in the ledger
-      #
-      #   2. Response: Entry received is in response to a previous request sent out from our sender.
-      #         These entries must have a status of "fulfilled" or "rejected" and have an entry in the ledger
-      #
-      #   3. Expired response: Entry received is in response to a previous request but failed to reply back in time.
-      #         These entries do not exist in the ledger and do not have a status of "pending". Upon receiving these
-      #         are dropped from the stream
-      #
-      def handle_message(redis_id, entry)
-        # Only process messages for our group since all dispatchers receive the same message
-        return if entry.destination_group != group_name
+      def check_for_new_messages
+        entry = read_from_group
 
-        ledger_entry = @ledger[entry.id]
+        # Entry received is in response to a previous request but failed to reply back in time.
+        ledger_entry = @ledger[entry]
+
+        # Sent to the group for processing by our consumers.
+        # This entry is not in response to a previous request sent out by our sender
         is_a_request = ledger_entry.nil? && entry.status == "pending"
+
+        # Response: Entry received in response to a previous request sent out from our sender.
         is_a_response = ledger_entry && ["fulfilled", "rejected"].include?(entry.status)
-        return reject!(redis_id) unless is_a_request || is_a_response
 
-        consumer_name = ledger_entry&.dispatch_to_consumer || find_load_balanced_consumer
-        redis.xclaim(stream_name, group_name, consumer_name, 0, redis_id)
-      end
+        RedisIPC.logger&.debug {
+          "#{entry.id} - Ledger? #{!ledger_entry.nil?} - Request? #{is_a_request} - Response? - #{is_a_response}"
+        }
+        return reject!(entry.redis_id) unless is_a_request || is_a_response
 
-      def handle_exception(exception)
-        # TODO: Write to logger, respond back with rejection message - right?
+        @redis.claim_message(find_load_balanced_consumer, entry.redis_id)
       end
 
       private
 
       def reject!(redis_id)
-        acknowledge_and_remove(redis_id)
+        @redis.acknowledge_and_remove(redis_id)
         nil
       end
 

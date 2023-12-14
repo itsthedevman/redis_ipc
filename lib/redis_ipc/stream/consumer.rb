@@ -9,7 +9,7 @@ module RedisIPC
         read_group_id: "0" # Read the latest message from this consumers Pending Entries List (PEL)
       }.freeze
 
-      attr_reader :name, :stream_name, :group_name, :redis
+      attr_reader :name, :stream_name, :group_name
 
       delegate :add_observer, :delete_observer, :count_observers, to: :@task
 
@@ -33,10 +33,10 @@ module RedisIPC
         validate!
 
         @options = DEFAULTS.merge(options)
-        @redis = Redis.new(redis_options)
+        @redis = Commands.new(stream_name, group_name, redis_options: redis_options)
 
         # This is the workhorse for the consumer
-        @task = Concurrent::TimerTask.new(execution_interval: @options[:execution_interval]) { handle_message }
+        @task = Concurrent::TimerTask.new(execution_interval: @options[:execution_interval]) { check_for_new_messages }
       end
 
       #
@@ -65,7 +65,7 @@ module RedisIPC
           # Ignores exceptions and only calls when it's a success
           when :on_message
             lambda do |_, entry, exception|
-              next if exception
+              next if exception || entry.nil?
 
               handler.call(entry)
             end
@@ -84,26 +84,6 @@ module RedisIPC
       end
 
       #
-      # Attempts to acknowledge and remove the given Redis message ID from the stream
-      #
-      # @param id [String] The Redis message ID
-      #
-      def acknowledge_and_remove(id)
-        # Some of the worst code I've ever written, but I want to make real sure that the message has been removed lol
-        begin
-          redis.xack(stream_name, group_name, id)
-        rescue Redis::CommandError
-        end
-
-        begin
-          redis.xdel(stream_name, id)
-        rescue Redis::CommandError
-        end
-
-        nil
-      end
-
-      #
       # Starts checking the stream for new messages
       #
       def listen
@@ -112,9 +92,7 @@ module RedisIPC
         ensure_group_exists
         @task.execute
 
-        RedisIPC.logger&.debug {
-          "#{@type} '#{name}' is listening on stream '#{stream_name}' and group '#{group_name}'"
-        }
+        RedisIPC.logger&.debug { "🔗 #{stream_name}:#{group_name} - #{@type} '#{name}'" }
 
         @task
       end
@@ -123,8 +101,16 @@ module RedisIPC
       # Stops checking the stream for new messages
       #
       def stop_listening
-        RedisIPC.logger&.debug { "#{@type} '#{name}' has stopped listening" }
+        RedisIPC.logger&.debug { "⛓️‍💥 #{stream_name}:#{group_name} - #{@type} '#{name}'" }
         @task.shutdown
+      end
+
+      #
+      # The method that is called by the consumer's task.
+      # Written this way to allow overwriting by other classes
+      #
+      def check_for_new_messages
+        read_from_group
       end
 
       private
@@ -141,29 +127,20 @@ module RedisIPC
       #
       # This method does not acknowledge the message in the stream. This must be handled by an observer
       #
-      def handle_message
-        response = redis.xreadgroup(
-          group_name, name, stream_name,
-          # The ID to read, including special IDs ">".
-          # Consumer uses "0" (read my latest entry), Dispatcher uses ">" (read latest unread entry)
-          @options[:read_group_id],
-          # The number of entries to read.
-          # Currently, this code only supports 1. Support for processing multiple entries
-          # could be implemented later for better performance
-          count: 1
-        )&.values&.flatten
-
-        RedisIPC.logger&.debug { "#{@type} '#{name}' received a new message: #{response}" }
+      # @return [Entry]
+      #
+      def read_from_group
+        # Currently, this code only supports reading one message at a time.
+        # Support for processing multiple entries could be implemented later for better performance
+        response = @redis.read_from_group(name, @options[:read_group_id])&.values&.flatten
+        RedisIPC.logger&.debug { "📬 #{stream_name}:#{group_name} - #{@type} '#{name}' - #{response}" }
         return if response.blank?
 
-        # Pass to any reading observer
         Entry.from_redis(*response)
       end
 
       def ensure_group_exists
-        return if redis.exists?(stream_name)
-
-        redis.xgroup(:create, stream_name, group_name, "$", mkstream: true)
+        @redis.create_group
       end
     end
   end

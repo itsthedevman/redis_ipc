@@ -12,17 +12,18 @@ module RedisIPC
         def initialize(*, ledger:, **)
           super(*, **)
           @ledger = ledger
-
-          add_callback(:on_message, self, :handle_message)
         end
 
-        def handle_message(redis_id, entry)
-          # Expired? Drop the message and don't pass it along to the observers
-          if ledger.expired?(entry.id)
-            delete(redis_id)
+        def check_for_new_messages
+          entry = read_from_group
+
+          # Expired? Drop the message
+          if (ledger_entry = @ledger[entry]) && ledger_entry.expired?
+            @redis.acknowledge_and_remove(entry.id)
             return
           end
 
+          # Pass to any observers
           entry
         end
       end

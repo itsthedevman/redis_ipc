@@ -3,7 +3,7 @@
 module RedisIPC
   class Stream
     class Ledger < Concurrent::Map
-      class Entry < Data.define(:expires_at, :dispatch_to_consumer)
+      class Entry < Data.define(:expires_at, :mailbox)
         def expired?
           Time.current >= expires_at
         end
@@ -18,22 +18,21 @@ module RedisIPC
         end
       end
 
-      def expired?(id)
-        # Expired but hasn't been removed yet. It will be removed shortly, though
-        if (entry = self[id])
-          entry.expired?
-        else
-          true
-        end
+      def [](entry)
+        super(entry.id)
       end
 
-      def add(id, consumer_name, expires_at: nil)
-        raise ArgumentError, "#{id} is already in the ledger" if self[id]
+      def add(entry)
+        raise ArgumentError, "#{entry.id} is already in the ledger" if self[entry]
 
-        self[id] = Ledger::Entry.new(
-          expires_at: expires_at || @timeout_in_seconds.from_now,
-          dispatch_to_consumer: consumer_name
-        )
+        mailbox = Concurrent::MVar.new
+        self[entry.id] = Ledger::Entry.new(expires_at: @timeout_in_seconds.from_now, mailbox: mailbox)
+
+        mailbox
+      end
+
+      def delete(entry)
+        super(entry.id)
       end
     end
   end

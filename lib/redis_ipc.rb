@@ -30,6 +30,7 @@ end
 
 [
   "stream",
+  "stream/commands",
   "stream/consumer",
   "stream/dispatcher",
   "stream/entry",
