@@ -8,8 +8,12 @@ describe RedisIPC::Stream do
   end
 
   before do
-    stream.on_message = lambda {}
-    stream.on_error = lambda {}
+    stream.on_message {}
+    stream.on_error {}
+  end
+
+  after do
+    stream.disconnect
   end
 
   describe "#connect" do
@@ -56,21 +60,22 @@ describe RedisIPC::Stream do
   describe "#disconnect"
 
   describe "Sending/Receiving" do
-    subject!(:other_stream) do
-      stream = described_class.new(stream_name, "other_group")
-      stream.on_error = -> {}
+    subject!(:other_stream) { described_class.new(stream_name, "other_group") }
 
-      stream.on_message = lambda do |entry|
-        puts "RECEIVED ENTRY: #{entry}"
-        stream.respond_to(entry: entry, content: "#{entry.content} back")
+    before do
+      other_stream.on_message do |entry|
+        other_stream.respond_to(entry: entry, content: "#{entry.content} back")
       end
 
+      other_stream.on_error do |exception|
+        puts(message: exception.message, backtrace: exception.backtrace)
+      end
+
+      other_stream.connect
       stream.connect
-      stream
     end
 
-    # The main stream connection
-    before { stream.connect }
+    after { other_stream.disconnect }
 
     context "when a valid message is sent" do
       it "receives a response" do

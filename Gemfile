@@ -14,4 +14,5 @@ group :development, :test do
   gem "rubocop-rspec", "~> 2.24"
   gem "rubocop-rails", "~> 2.21", require: false
   gem "pry"
+  gem "benchmark-ips"
 end

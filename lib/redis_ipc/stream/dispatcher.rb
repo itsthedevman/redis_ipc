@@ -3,74 +3,77 @@
 module RedisIPC
   class Stream
     #
-    # A consumer that reads unread messages and assigns them to consumers to be processed
+    # A consumer that reads unread entries and assigns them to consumers to be processed
     #
     class Dispatcher < Consumer
       DEFAULTS = {
+        # The number of Dispatchers to create.
+        # Note: Unlike Consumers, Dispatchers are shared between groups. This number needs to take into
+        # account the number of other groups that will be connecting to this stream
         pool_size: 2,
-        execution_interval: 0.01, # Seconds
-        read_group_id: ">" # Read the latest unread message for the group
+
+        # How often should the consumer process entries in seconds
+        execution_interval: 0.01,
+
+        # Controls what queue this consumer processes
+        #   :self - Processes the PEL for this consumer. Acts as an endpoint for all entries for this group
+        #   :stream - Processes unread entries for the stream. Acts as a dispatcher for all entries in a stream
+        queue: :stream
       }.freeze
 
-      MOVE_AHEAD = -1
-      MOVE_BEHIND = 1
-
-      def initialize(name, consumer_names = [], ledger:, **)
+      def initialize(name, ledger:, **)
         super(name, options: DEFAULTS, **)
 
-        @consumer_names = consumer_names
         @ledger = ledger
       end
 
-      def consumer_stats
-        @redis.consumer_info
-          .index_by { |consumer| consumer["name"] }
-          .select { |name, _| @consumer_names.include?(name) }
-      end
+      #
+      # Reads in any unread entries in the stream for the group and dispatches it to a load balanced consumer
+      #
+      # One dispatcher per group will receive a stream entry, regardless of content. Dispatchers will then
+      # ignore all entries that are not
+      #
+      #
+      def check_for_entries
+        entry = read_from_stream
+        return if entry.nil? || group_name != entry.destination_group
 
-      def check_for_new_messages
-        entry = read_from_group
+        available_consumer = find_load_balanced_consumer(entry.destination_group)
+        if available_consumer.nil?
+          # TODO! This isn't what I want this to be
+          reject!(entry)
+          return
+        end
 
-        # Entry received is in response to a previous request but failed to reply back in time.
-        ledger_entry = @ledger[entry]
+        RedisIPC.logger&.debug { "📬 '#{name}' - Dispatching #{entry.id}:#{entry.redis_id} to #{available_consumer}" }
 
-        # Sent to the group for processing by our consumers.
-        # This entry is not in response to a previous request sent out by our sender
-        is_a_request = ledger_entry.nil? && entry.status == "pending"
-
-        # Response: Entry received in response to a previous request sent out from our sender.
-        is_a_response = ledger_entry && ["fulfilled", "rejected"].include?(entry.status)
-
-        RedisIPC.logger&.debug {
-          "#{entry.id} - Ledger? #{!ledger_entry.nil?} - Request? #{is_a_request} - Response? - #{is_a_response}"
-        }
-        return reject!(entry.redis_id) unless is_a_request || is_a_response
-
-        @redis.claim_message(find_load_balanced_consumer, entry.redis_id)
+        @redis.claim_entry(available_consumer, entry)
       end
 
       private
-
-      def reject!(redis_id)
-        @redis.acknowledge_and_remove(redis_id)
-        nil
-      end
 
       #
       # Load balances the consumers and returns the least busiest
       #
       # @return [Consumer]
       #
-      def find_load_balanced_consumer
-        # Loading #consumer_stats is an expensive task for Redis
-        busy_consumers = consumer_stats
+      def find_load_balanced_consumer(destination_group_name)
+        consumer_names = @redis.consumer_names(destination_group_name)
 
-        available_consumers = @consumer_names.sort do |a, b|
+        busy_consumers = @redis.consumer_info(destination_group_name)
+        busy_consumers = busy_consumers
+          .select { |consumer| consumer_names.include?(consumer["name"]) }
+          .index_by { |consumer| consumer["name"] }
+
+        available_consumers = consumer_names.sort do |a, b|
           load_balance_consumer(a, b, busy_consumers: busy_consumers)
         end
 
         available_consumers.first
       end
+
+      MOVE_AHEAD = -1
+      MOVE_BEHIND = 1
 
       def load_balance_consumer(consumer_a_name, consumer_b_name, busy_consumers:)
         consumer_a_info = busy_consumers[consumer_a_name]

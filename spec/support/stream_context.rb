@@ -5,6 +5,7 @@ RSpec.shared_context("stream") do
   let!(:group_name) { "example_group" }
 
   before do
+    destroy_stream
     create_stream
   end
 
@@ -37,6 +38,8 @@ RSpec.shared_context("stream") do
   def destroy_stream
     redis.xgroup(:destroy, stream_name, group_name)
     redis.del(stream_name)
+  rescue
+    nil
   end
 
   def add_to_stream(entry)

@@ -4,7 +4,7 @@ module RedisIPC
   class Stream
     OPTION_DEFAULTS = {
       pool_size: 10, # Number of connections for sending
-      entry_timeout: 5, # Seconds
+      entry_timeout: 999, # Seconds
       cleanup_interval: 1 # Seconds
     }.freeze
 
@@ -16,12 +16,20 @@ module RedisIPC
     class_attribute :stream_name
     class_attribute :group_name
 
-    class_attribute :on_message
-    class_attribute :on_error
-
     def initialize(stream, group)
       self.stream_name = stream
       self.group_name = group
+
+      @on_message = nil
+      @on_error = nil
+    end
+
+    def on_message(&block)
+      @on_message = block
+    end
+
+    def on_error(&block)
+      @on_error = block
     end
 
     def connect(options: {}, redis_options: {})
@@ -31,23 +39,25 @@ module RedisIPC
       @redis_options = REDIS_DEFAULTS.merge(redis_options)
 
       @ledger = Ledger.new(**@options.slice(:entry_timeout, :cleanup_interval))
-      @redis = Commands.new(stream_name, group_name, pool_size: @options[:pool_size], redis_options: @redis_options)
+      @redis = Commands.new(
+        stream_name, group_name,
+        pool_size: @options[:pool_size],
+        redis_options: @redis_options
+      )
 
       @consumers = create_consumers
       @dispatchers = create_dispatchers
 
       RedisIPC.logger&.debug {
-        "🔗 #{stream_name}:#{group_name} - #{@consumers.size} consumers, #{@dispatchers.size} dispatchers"
+        "🔗 #{@consumers.size} consumers, #{@dispatchers.size} dispatchers"
       }
 
       self
     end
 
     def disconnect
-      RedisIPC.logger&.debug { "⛓️‍💥 #{stream_name}:#{group_name}" }
-
-      @consumers.each(&:stop_listening)
       @dispatchers.each(&:stop_listening)
+      @consumers.each(&:stop_listening)
       @redis.shutdown
 
       @options = nil
@@ -57,6 +67,8 @@ module RedisIPC
       @consumers = nil
       @dispatchers = nil
       @redis = nil
+
+      RedisIPC.logger&.debug { "⛓️‍💥 #{stream_name}:#{group_name}" }
 
       self
     end
@@ -91,14 +103,14 @@ module RedisIPC
         raise ConnectionError, "Stream has not been set up correctly. Please call Stream#connect first"
       end
 
-      entry = entry.with(
+      response_entry = entry.with(
         content: content,
         status: status,
-        source_group: group_name,
+        source_group: entry.destination_group,
         destination_group: entry.source_group
       )
 
-      @redis.add_to_stream(entry.to_h)
+      @redis.add_to_stream(response_entry.to_h)
 
       nil
     end
@@ -106,36 +118,33 @@ module RedisIPC
     #
     # @private
     #
-    def handle_message(entry)
-      return if @ledger[entry]
-
-      on_message.call(entry)
-    ensure
-      # Acknowledged that we received the ID to remove it from the PEL
-      @redis.acknowledge_and_remove(entry.redis_id)
+    def handle_entry(entry)
+      @on_message.call(entry)
     end
 
     #
     # @private
     #
     def handle_exception(exception)
-      on_error.call(exception)
+      @on_error.call(exception)
     end
 
     private
 
     def validate!
-      raise ConfigurationError, "Stream#on_message must be a lambda or proc" if !on_message.is_a?(Proc)
-      raise ConfigurationError, "Stream#on_error must be a lambda or proc" if !on_error.is_a?(Proc)
+      raise ConfigurationError, "Stream#on_message must be a lambda or proc" if !@on_message.is_a?(Proc)
+      raise ConfigurationError, "Stream#on_error must be a lambda or proc" if !@on_error.is_a?(Proc)
       raise ConnectionError, "Stream is already connected" if @ledger
     end
 
     def create_consumers
+      @redis.clear_available_consumers
+
       options = @options.fetch(:consumer, Consumer::DEFAULTS)
 
       options[:pool_size].times.map do |index|
         consumer = Ledger::Consumer.new(
-          "consumer_#{index}",
+          "#{group_name}_consumer_#{index}",
           stream: stream_name,
           group: group_name,
           ledger: @ledger,
@@ -143,7 +152,8 @@ module RedisIPC
           redis_options: @redis_options
         )
 
-        consumer.add_callback(:on_message, self, :handle_message)
+        consumer.add_callback(:on_error, self, :handle_exception)
+        consumer.add_callback(:on_message, self, :handle_entry)
 
         consumer.listen
         consumer
@@ -152,18 +162,18 @@ module RedisIPC
 
     def create_dispatchers
       options = @options.fetch(:dispatcher, Dispatcher::DEFAULTS)
-      consumer_names = @consumers.map(&:name)
 
       options[:pool_size].times.map do |index|
         dispatcher = Dispatcher.new(
-          "dispatcher_#{index}",
-          consumer_names,
+          "#{group_name}_dispatcher_#{index}",
           stream: stream_name,
           group: group_name,
           ledger: @ledger,
           options: options,
           redis_options: @redis_options
         )
+
+        dispatcher.add_callback(:on_error, self, :handle_exception)
 
         dispatcher.listen
         dispatcher
@@ -179,7 +189,7 @@ module RedisIPC
 
       # Track the message for expiration and ensuring it is returned to our consumer
       mailbox = @ledger.add(entry)
-      redis_id = @redis.add_to_stream(entry.to_h)
+      @redis.add_to_stream(entry.to_h)
 
       case (result = mailbox.take(@options[:entry_timeout]))
       when Concurrent::MVar::TIMEOUT
@@ -190,8 +200,8 @@ module RedisIPC
         result
       end
     ensure
+      puts "#{entry.id} - DELETING LEDGER ENTRY"
       @ledger.delete(entry)
-      @redis.acknowledge_and_remove(redis_id)
     end
   end
 end
