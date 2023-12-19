@@ -48,10 +48,6 @@ module RedisIPC
       @consumers = create_consumers
       @dispatchers = create_dispatchers
 
-      RedisIPC.logger&.debug {
-        "🔗 #{@consumers.size} consumers, #{@dispatchers.size} dispatchers"
-      }
-
       self
     end
 
@@ -67,8 +63,6 @@ module RedisIPC
       @consumers = nil
       @dispatchers = nil
       @redis = nil
-
-      RedisIPC.logger&.debug { "⛓️‍💥 #{stream_name}:#{group_name}" }
 
       self
     end
@@ -200,7 +194,6 @@ module RedisIPC
         result
       end
     ensure
-      puts "#{entry.id} - DELETING LEDGER ENTRY"
       @ledger.delete(entry)
     end
   end

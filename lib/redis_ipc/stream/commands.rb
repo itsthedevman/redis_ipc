@@ -20,8 +20,6 @@ module RedisIPC
       end
 
       def add_to_stream(content)
-        RedisIPC.logger&.debug { "✉️  #{content}" }
-
         @redis_pool.with { |redis| redis.xadd(stream_name, content) }
       end
 

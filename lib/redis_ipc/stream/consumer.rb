@@ -107,7 +107,6 @@ module RedisIPC
 
         change_availability
 
-        RedisIPC.logger&.debug { "🔗 '#{name}'" }
         @task
       end
 
@@ -117,10 +116,7 @@ module RedisIPC
       def stop_listening
         @task.shutdown
 
-        RedisIPC.logger&.debug { "⛓️‍💥 '#{name}'" }
-
         change_availability
-
         true
       end
 

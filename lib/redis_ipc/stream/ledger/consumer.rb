@@ -33,10 +33,6 @@ module RedisIPC
           # Response: Entry received in response to a previous request sent out from our sender.
           is_a_response = !ledger_entry.nil? && ["fulfilled", "rejected"].include?(entry.status)
 
-          RedisIPC.logger&.debug {
-            "'#{name}' - #{entry.id}:#{entry.redis_id} - Ledger? #{!ledger_entry.nil?} - Request? #{is_a_request} - Response? - #{is_a_response}"
-          }
-
           if !is_a_request && !is_a_response
             reject!(entry)
             return
@@ -47,16 +43,12 @@ module RedisIPC
             return
           end
 
-          RedisIPC.logger&.debug { "'#{name}' - #{entry.id} before observing" }
-
           # TimerTask notifies the observers AFTER scheduling the next execution of the task
           # To ensures all observers have a chance to execute their code before the task is ran again
           # This also allows me to acknowledge and remove the message before this consumer attempts to read it again
           @task.instance_exec(entry) do |entry|
             observers.notify_observers { [Time.current, entry, nil] }
           end
-
-          RedisIPC.logger&.debug { "'#{name}' - #{entry.id} acknowledged" }
 
           nil
         ensure

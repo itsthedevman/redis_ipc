@@ -45,8 +45,6 @@ module RedisIPC
           return
         end
 
-        RedisIPC.logger&.debug { "📬 '#{name}' - Dispatching #{entry.id}:#{entry.redis_id} to #{available_consumer}" }
-
         @redis.claim_entry(available_consumer, entry)
       end
 
