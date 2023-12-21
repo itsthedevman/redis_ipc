@@ -25,6 +25,7 @@ module RedisIPC
         super(name, options: DEFAULTS, **)
 
         @ledger = ledger
+        check_for_consumers!
       end
 
       #
@@ -38,10 +39,9 @@ module RedisIPC
         entry = read_from_stream
         return if entry.nil? || group_name != entry.destination_group
 
-        available_consumer = find_load_balanced_consumer(entry.destination_group)
+        available_consumer = find_load_balanced_consumer
         if available_consumer.nil?
-          # TODO! This isn't what I want this to be
-          reject!(entry)
+          reject!(entry, reason: "DISPATCH_FAILURE #{group_name}:#{name} failed to find an available consumer")
           return
         end
 
@@ -50,16 +50,21 @@ module RedisIPC
 
       private
 
+      def check_for_consumers!
+        return if @redis.consumer_names(group_name).size > 0
+
+        raise ConfigurationError, "No consumers available for #{stream_name}:#{group_name}. Please make sure at least one Consumer is listening before creating any Dispatchers"
+      end
+
       #
       # Load balances the consumers and returns the least busiest
       #
       # @return [Consumer]
       #
-      def find_load_balanced_consumer(destination_group_name)
-        consumer_names = @redis.consumer_names(destination_group_name)
+      def find_load_balanced_consumer
+        consumer_names = @redis.consumer_names(group_name)
 
-        busy_consumers = @redis.consumer_info(destination_group_name)
-        busy_consumers = busy_consumers
+        busy_consumers = @redis.consumer_info(group_name)
           .select { |consumer| consumer_names.include?(consumer["name"]) }
           .index_by { |consumer| consumer["name"] }
 

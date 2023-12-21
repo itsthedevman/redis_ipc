@@ -84,13 +84,3 @@ describe RedisIPC::Stream do
     end
   end
 end
-
-# stream = RedisIPC::Stream.new(stream_name, group: group_name)
-
-# stream.on_message = lambda do |content|
-# end
-
-# stream.on_error = lambda do |content|
-# end
-
-# stream.connect

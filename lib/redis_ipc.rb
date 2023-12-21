@@ -22,10 +22,6 @@ module RedisIPC
   class ConnectionError < Error; end
 
   class ConfigurationError < Error; end
-
-  class << self
-    attr_accessor :logger
-  end
 end
 
 [

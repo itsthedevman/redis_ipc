@@ -4,7 +4,7 @@ module RedisIPC
   class Stream
     OPTION_DEFAULTS = {
       pool_size: 10, # Number of connections for sending
-      entry_timeout: 999, # Seconds
+      entry_timeout: 5, # Seconds
       cleanup_interval: 1 # Seconds
     }.freeze
 
@@ -33,7 +33,7 @@ module RedisIPC
     end
 
     def connect(options: {}, redis_options: {})
-      validate!
+      check_for_valid_configuration!
 
       @options = OPTION_DEFAULTS.merge(options)
       @redis_options = REDIS_DEFAULTS.merge(redis_options)
@@ -68,9 +68,7 @@ module RedisIPC
     end
 
     def send(content:, to:)
-      if @ledger.nil?
-        raise ConnectionError, "Stream has not been set up correctly. Please call Stream#connect first"
-      end
+      check_for_ledger!
 
       # Using a Promise because of the functionality it provides which simplifies this code
       promise = Concurrent::Promise.execute { track_and_send(content, to) }
@@ -84,27 +82,20 @@ module RedisIPC
       promise.value
     end
 
-    #
-    # A wrapper for #send, used response to an inbound entry (to:) using the provided content (with:)
-    # This method is non-blocking. Any further calls will result in new messages being sent
-    # to the source group and immediately dropped
-    #
-    # @param to [RedisIPC::Stream::Entry] The entry that we are responding to
-    # @param with [Any] Provided data will be added as content on the entry
-    #
-    def respond_to(entry:, content:, status: "fulfilled")
-      if @ledger.nil?
-        raise ConnectionError, "Stream has not been set up correctly. Please call Stream#connect first"
-      end
+    def fulfill(entry:, content:)
+      check_for_ledger!
 
-      response_entry = entry.with(
-        content: content,
-        status: status,
-        source_group: entry.destination_group,
-        destination_group: entry.source_group
-      )
+      @redis.add_to_stream(entry.fulfilled(content: content))
 
-      @redis.add_to_stream(response_entry.to_h)
+      nil
+    end
+
+    alias_method :respond_to, :fulfill
+
+    def reject(entry:, content:)
+      check_for_ledger!
+
+      @redis.add_to_stream(entry.rejected(content: content))
 
       nil
     end
@@ -125,10 +116,14 @@ module RedisIPC
 
     private
 
-    def validate!
+    def check_for_valid_configuration!
       raise ConfigurationError, "Stream#on_message must be a lambda or proc" if !@on_message.is_a?(Proc)
       raise ConfigurationError, "Stream#on_error must be a lambda or proc" if !@on_error.is_a?(Proc)
       raise ConnectionError, "Stream is already connected" if @ledger
+    end
+
+    def check_for_ledger!
+      raise ConnectionError, "Stream has not been set up correctly. Please call Stream#connect first" if @ledger.nil?
     end
 
     def create_consumers
@@ -181,10 +176,12 @@ module RedisIPC
         destination_group: destination_group
       )
 
-      # Track the message for expiration and ensuring it is returned to our consumer
+      # The entry must be added to the ledger before adding to the stream as that, in testing, the consumers can
+      # get ahold of the entry before the ledger has everything ready.
       mailbox = @ledger.add(entry)
-      @redis.add_to_stream(entry.to_h)
+      @redis.add_to_stream(entry)
 
+      # The mailbox is a Concurrent::MVar which allows us to wait for data to be added (or timeout)
       case (result = mailbox.take(@options[:entry_timeout]))
       when Concurrent::MVar::TIMEOUT
         raise TimeoutError

@@ -6,7 +6,11 @@ module RedisIPC
     # Represents an entry in the Redis Stream
     #
     class Entry < Data.define(:id, :redis_id, :status, :content, :source_group, :destination_group)
-      VALID_STATUS = ["pending", "fulfilled", "rejected"].freeze
+      VALID_STATUS = [
+        STATUS_PENDING = "pending",
+        STATUS_FULFILLED = "fulfilled",
+        STATUS_REJECTED = "rejected"
+      ].freeze
 
       #
       # Returns an array containing two items, the Redis message ID and the new Entry instance
@@ -30,7 +34,7 @@ module RedisIPC
       #
       def initialize(id: nil, redis_id: nil, status: nil, **)
         id ||= SecureRandom.uuid.delete("-")
-        status ||= "pending"
+        status ||= STATUS_PENDING
         raise ArgumentError, "Status is not one of #{VALID_STATUS}" unless VALID_STATUS.include?(status)
 
         super(id: id, redis_id: redis_id, status: status, **)
@@ -38,6 +42,24 @@ module RedisIPC
 
       def to_h
         super.except(:redis_id)
+      end
+
+      def fulfilled(content:)
+        with(
+          content: content,
+          status: STATUS_FULFILLED,
+          source_group: destination_group,
+          destination_group: source_group
+        )
+      end
+
+      def rejected(content:)
+        with(
+          content: content,
+          status: STATUS_REJECTED,
+          source_group: destination_group,
+          destination_group: source_group
+        )
       end
     end
   end

@@ -40,14 +40,11 @@ module RedisIPC
         @stream_name = stream.freeze
         @group_name = group.freeze
 
-        validate!
+        check_for_valid_configuration!
 
         @options = DEFAULTS.merge(options).freeze
         @redis = Commands.new(stream_name, group_name, redis_options: redis_options)
         @read_id = (@options[:queue] == :self) ? READ_FROM_PEL : READ_FROM_STREAM
-
-        # Used to ensure the task does not finish until all observers does
-        @callback_sync = nil
 
         # This is the workhorse for the consumer
         @task = Concurrent::TimerTask.new(execution_interval: @options[:execution_interval], freeze_on_deref: true) do
@@ -134,15 +131,15 @@ module RedisIPC
 
       private
 
-      def validate!
+      def check_for_valid_configuration!
         raise ArgumentError, "was created without a name" if name.blank?
         raise ArgumentError, "#{name} was created without a stream name" if stream_name.blank?
         raise ArgumentError, "#{name} was created without a group name" if group_name.blank?
       end
 
-      def reject!(entry)
-        # TODO: Send back an error to source_group
-        RedisIPC.logger&.error { "❗ '#{name}' - TODO! Rejected #{entry.id}" }
+      def reject!(entry, reason:)
+        @redis.add_to_stream(entry.rejected(content: reason))
+        nil
       end
 
       def change_availability

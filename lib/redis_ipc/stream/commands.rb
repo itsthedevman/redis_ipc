@@ -19,8 +19,8 @@ module RedisIPC
         @redis_pool.with { |redis| redis.del(available_redis_consumers_key) }
       end
 
-      def add_to_stream(content)
-        @redis_pool.with { |redis| redis.xadd(stream_name, content) }
+      def add_to_stream(entry)
+        @redis_pool.with { |redis| redis.xadd(stream_name, entry.to_h) }
       end
 
       def acknowledge_and_remove(id)
