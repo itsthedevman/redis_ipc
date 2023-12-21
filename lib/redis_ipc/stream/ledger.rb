@@ -3,17 +3,26 @@
 module RedisIPC
   class Stream
     class Ledger < Concurrent::Map
+      DEFAULTS = {
+        entry_timeout: 5, # Seconds
+        cleanup_interval: 1 # Seconds
+      }.freeze
+
       class Entry < Data.define(:expires_at, :mailbox)
         def expired?
           Time.current >= expires_at
         end
       end
 
-      def initialize(entry_timeout:, cleanup_interval:, **)
-        super(**)
+      attr_reader :options
 
-        @timeout_in_seconds = entry_timeout.seconds
-        @cleanup_task = Concurrent::TimerTask.execute(execution_interval: cleanup_interval) do
+      def initialize(options = {})
+        super()
+
+        @options = DEFAULTS.merge(options)
+
+        @timeout_in_seconds = @options[:entry_timeout].seconds
+        @cleanup_task = Concurrent::TimerTask.execute(execution_interval: @options[:cleanup_interval]) do
           each { |id, entry| delete(id) if entry.expired? }
         end
       end

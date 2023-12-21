@@ -4,21 +4,13 @@ module RedisIPC
   class Stream
     class Consumer
       DEFAULTS = {
-        # The number of Consumers to create to process entries for their group. Any consumers created
-        # for a group will only process entries for their group
-        pool_size: 5,
+        # The number of Consumers to create to process entries for their group.
+        # Any consumers created for a group will only process entries for their group
+        pool_size: 10,
 
         # How often does the consumer check for new messages
-        execution_interval: 0.01,
-
-        # Controls what queue this consumer processes
-        #   :self - Processes the PEL for this consumer. Acts as an endpoint for all entries for this group
-        #   :stream - Processes unread entries for the stream. Acts as a dispatcher for all entries in a stream
-        queue: :self
+        execution_interval: 0.01
       }.freeze
-
-      READ_FROM_PEL = "0"
-      READ_FROM_STREAM = ">"
 
       attr_reader :name, :stream_name, :group_name
 
@@ -32,10 +24,10 @@ module RedisIPC
       # @param name [String] The unique name for this consumer to be used in Redis
       # @param stream [String] The name of the Redis Stream
       # @param group [String] The name of the group in the Stream
+      # @param redis [RedisIPC::Stream::Commands] The redis commands instance used by Stream
       # @param options [Hash] Configuration values for the Consumer. See Consumer::DEFAULTS
-      # @param redis_options [Hash] The Redis options to be passed into the client. See Stream::REDIS_DEFAULTS
       #
-      def initialize(name, stream:, group:, options: {}, redis_options: {})
+      def initialize(name, stream:, group:, redis:, options: {})
         @name = name.freeze
         @stream_name = stream.freeze
         @group_name = group.freeze
@@ -43,8 +35,7 @@ module RedisIPC
         check_for_valid_configuration!
 
         @options = DEFAULTS.merge(options).freeze
-        @redis = Commands.new(stream_name, group_name, redis_options: redis_options)
-        @read_id = (@options[:queue] == :self) ? READ_FROM_PEL : READ_FROM_STREAM
+        @redis = redis
 
         # This is the workhorse for the consumer
         @task = Concurrent::TimerTask.new(execution_interval: @options[:execution_interval], freeze_on_deref: true) do
@@ -143,8 +134,6 @@ module RedisIPC
       end
 
       def change_availability
-        return unless @options[:queue] == :self
-
         if @task.running?
           @redis.consumer_is_available(name)
         else
@@ -152,21 +141,8 @@ module RedisIPC
         end
       end
 
-      #
-      # Reads the latest messages from the PEL (if a consumer) or the group (if a dispatcher)
-      # Message entries are then passed to any observers currently registered with the consumer
-      #
-      # This method does not acknowledge the message in the stream. This must be handled by an observer
-      #
-      # @return [Entry]
-      #
       def read_from_stream
-        # Currently, this code only supports reading one message at a time.
-        # Support for processing multiple entries could be implemented later for better performance
-        response = @redis.read_from_stream(name, @read_id)&.values&.flatten
-        return if response.blank?
-
-        Entry.from_redis(*response)
+        @redis.read_next_pending(name)
       end
 
       def acknowledge_and_remove(entry)

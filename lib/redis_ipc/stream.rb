@@ -2,17 +2,6 @@
 
 module RedisIPC
   class Stream
-    OPTION_DEFAULTS = {
-      pool_size: 10, # Number of connections for sending
-      entry_timeout: 5, # Seconds
-      cleanup_interval: 1 # Seconds
-    }.freeze
-
-    REDIS_DEFAULTS = {
-      host: ENV.fetch("REDIS_HOST", "localhost"),
-      port: ENV.fetch("REDIS_PORT", 6379)
-    }.freeze
-
     class_attribute :stream_name
     class_attribute :group_name
 
@@ -35,18 +24,36 @@ module RedisIPC
     def connect(options: {}, redis_options: {})
       check_for_valid_configuration!
 
-      @options = OPTION_DEFAULTS.merge(options)
-      @redis_options = REDIS_DEFAULTS.merge(redis_options)
+      options = {
+        pool_size: 10,
+        max_pool_size: nil,
+        ledger: Ledger::DEFAULTS,
+        consumer: Ledger::Consumer::DEFAULTS,
+        dispatcher: Dispatcher::DEFAULTS
+      }.merge(options)
 
-      @ledger = Ledger.new(**@options.slice(:entry_timeout, :cleanup_interval))
-      @redis = Commands.new(
-        stream_name, group_name,
-        pool_size: @options[:pool_size],
-        redis_options: @redis_options
+      #
+      # The redis pool is shared between the stream, all consumers, and all dispatchers.
+      #
+      # A consumer (Consumer, Dispatcher, Ledger::Consumer) should only ever use one Redis client at a time
+      # since there are no blocking commands and tasks cannot stack. This means the bulk of the pool size
+      # is dependent on how many threads are going to be sending entries at a single time.
+      #
+      # Since this code has no real life testing, this default is purely based on educated guesses.
+      # To make sure the connection pool is sufficiently padded, I'm allotting two connections per consumer which
+      # makes the default max pool size of 36 (=10 + (10 * 2) + (3 * 2))
+      #
+      max_pool_size = options[:max_pool_size] || (
+        options[:pool_size] +
+        (options.dig(:consumer, :pool_size) * 2) +
+        (options.dig(:dispatcher, :pool_size) * 2)
       )
 
-      @consumers = create_consumers
-      @dispatchers = create_dispatchers
+      @redis = Commands.new(stream_name, group_name, pool_size: max_pool_size, redis_options: redis_options)
+      @ledger = Ledger.new(options[:ledger])
+
+      @consumers = create_consumers(options[:consumer])
+      @dispatchers = create_dispatchers(options[:dispatcher])
 
       self
     end
@@ -56,12 +63,9 @@ module RedisIPC
       @consumers.each(&:stop_listening)
       @redis.shutdown
 
-      @options = nil
-      @redis_options = nil
-
-      @ledger = nil
-      @consumers = nil
       @dispatchers = nil
+      @consumers = nil
+      @ledger = nil
       @redis = nil
 
       self
@@ -126,19 +130,15 @@ module RedisIPC
       raise ConnectionError, "Stream has not been set up correctly. Please call Stream#connect first" if @ledger.nil?
     end
 
-    def create_consumers
-      @redis.clear_available_consumers
-
-      options = @options.fetch(:consumer, Consumer::DEFAULTS)
-
+    def create_consumers(options)
       options[:pool_size].times.map do |index|
         consumer = Ledger::Consumer.new(
           "#{group_name}_consumer_#{index}",
           stream: stream_name,
           group: group_name,
+          redis: @redis,
           ledger: @ledger,
-          options: options,
-          redis_options: @redis_options
+          options: options
         )
 
         consumer.add_callback(:on_error, self, :handle_exception)
@@ -149,17 +149,15 @@ module RedisIPC
       end
     end
 
-    def create_dispatchers
-      options = @options.fetch(:dispatcher, Dispatcher::DEFAULTS)
-
+    def create_dispatchers(options)
       options[:pool_size].times.map do |index|
         dispatcher = Dispatcher.new(
           "#{group_name}_dispatcher_#{index}",
           stream: stream_name,
           group: group_name,
+          redis: @redis,
           ledger: @ledger,
-          options: options,
-          redis_options: @redis_options
+          options: options
         )
 
         dispatcher.add_callback(:on_error, self, :handle_exception)
@@ -182,7 +180,7 @@ module RedisIPC
       @redis.add_to_stream(entry)
 
       # The mailbox is a Concurrent::MVar which allows us to wait for data to be added (or timeout)
-      case (result = mailbox.take(@options[:entry_timeout]))
+      case (result = mailbox.take(@ledger.options[:entry_timeout]))
       when Concurrent::MVar::TIMEOUT
         raise TimeoutError
       when StandardError

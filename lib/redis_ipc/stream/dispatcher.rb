@@ -7,18 +7,11 @@ module RedisIPC
     #
     class Dispatcher < Consumer
       DEFAULTS = {
-        # The number of Dispatchers to create.
-        # Note: Unlike Consumers, Dispatchers are shared between groups. This number needs to take into
-        # account the number of other groups that will be connecting to this stream
-        pool_size: 2,
+        # The number of Dispatchers to create
+        pool_size: 3,
 
         # How often should the consumer process entries in seconds
-        execution_interval: 0.01,
-
-        # Controls what queue this consumer processes
-        #   :self - Processes the PEL for this consumer. Acts as an endpoint for all entries for this group
-        #   :stream - Processes unread entries for the stream. Acts as a dispatcher for all entries in a stream
-        queue: :stream
+        execution_interval: 0.01
       }.freeze
 
       def initialize(name, ledger:, **)
@@ -50,23 +43,27 @@ module RedisIPC
 
       private
 
+      # noop
+      def change_availability = nil
+
+      def read_from_stream
+        # Dispatchers pull from
+        @redis.next_reclaimed_entry(name) || @redis.next_unread_entry(name) || @redis.next_pending_entry(name)
+      end
+
+      def available_consumer_names
+        @redis.available_consumer_names(group_name)
+      end
+
       def check_for_consumers!
-        return if @redis.consumer_names(group_name).size > 0
+        return if available_consumer_names.size > 0
 
         raise ConfigurationError, "No consumers available for #{stream_name}:#{group_name}. Please make sure at least one Consumer is listening before creating any Dispatchers"
       end
 
-      #
-      # Load balances the consumers and returns the least busiest
-      #
-      # @return [Consumer]
-      #
       def find_load_balanced_consumer
-        consumer_names = @redis.consumer_names(group_name)
-
-        busy_consumers = @redis.consumer_info(group_name)
-          .select { |consumer| consumer_names.include?(consumer["name"]) }
-          .index_by { |consumer| consumer["name"] }
+        consumer_names = available_consumer_names
+        busy_consumers = @redis.consumer_info(group_name, consumer_names)
 
         available_consumers = consumer_names.sort do |a, b|
           load_balance_consumer(a, b, busy_consumers: busy_consumers)

@@ -4,35 +4,41 @@ RSpec.shared_context("stream") do
   let!(:stream_name) { "example_stream" }
   let!(:group_name) { "example_group" }
 
+  let(:redis_commands) { RedisIPC::Stream::Commands.new(stream_name, group_name) }
+  let(:redis_pool) { redis_commands.redis_pool }
+  let(:redis) { redis_pool.checkout }
+
+  let(:example_entry) do
+    RedisIPC::Stream::Entry.new(
+      source_group: group_name,
+      destination_group: "other_example_group",
+      content: "Hello"
+    )
+  end
+
   before do
     destroy_stream
-    create_stream
+    create_group
   end
 
   after do
     destroy_stream
+
+    # Rechecks in the redis connection if one is checked out
+    redis_pool.checkin if defined?(:redis)
   end
 
-  def redis
-    @redis ||= Redis.new(**RedisIPC::Stream::REDIS_DEFAULTS)
+  delegate :create_group, :unread_entries_size, :consumer_info, :claim_entry,
+    :next_unread_entry, :next_pending_entry,
+    to: :redis_commands
+
+  def add_to_stream(entry = example_entry)
+    redis_id = redis_commands.add_to_stream(entry)
+    entry.with(redis_id: redis_id)
   end
 
-  def consumer_stats
-    redis.xinfo(:consumers, stream_name, group_name)
-  end
-
-  def consumer_only_stats(consumer_names)
-    consumer_stats.select { |c| consumer_names.include?(c["name"]) }
-  end
-
-  def consumer_stats_for(consumer)
-    consumer_stats.find { |c| c["name"] == consumer.name }
-  end
-
-  def create_stream
-    return if redis.exists?(stream_name)
-
-    redis.xgroup(:create, stream_name, group_name, "$", mkstream: true)
+  def consumer_info_for(*)
+    consumer_info.slice(*)
   end
 
   def destroy_stream
@@ -40,10 +46,6 @@ RSpec.shared_context("stream") do
     redis.del(stream_name)
   rescue
     nil
-  end
-
-  def add_to_stream(entry)
-    redis.xadd(stream_name, entry.to_h)
   end
 
   def send_and_delegate_to_consumer(consumer, dispatcher = nil, content:)
@@ -54,36 +56,11 @@ RSpec.shared_context("stream") do
     )
 
     id = add_to_stream(entry)
-    redis.xreadgroup(group_name, dispatcher&.name || "auto_dispatcher", stream_name, ">", count: 1)
-    redis.xclaim(stream_name, group_name, consumer.name, 0, id)
+    entry = entry.with(redis_id: id)
 
-    [id, entry]
-  end
+    redis_commands.read_from_stream(dispatcher&.name || "auto_dispatcher", ">")
+    claim_entry(consumer.name, entry)
 
-  def wait_for_response!(consumer, ack: true)
-    response = nil
-
-    observer = consumer.add_observer do |_, (id, result), exception|
-      response = exception || result
-      consumer.stop_listening
-    end
-
-    task = consumer.listen
-
-    count = 0
-    while task.running? && count < 20 # 2 seconds
-      sleep(0.1)
-      count += 1
-    end
-
-    # Cleanup
-    consumer.stop_listening if task.running?
-    consumer.delete_observer(observer)
-
-    return if response.nil?
-    raise response if response.is_a?(Exception)
-
-    consumer.acknowledge_and_remove(response.id) if ack
-    response
+    entry
   end
 end
