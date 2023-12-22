@@ -28,7 +28,7 @@ RSpec.shared_context("stream") do
     redis_pool.checkin if defined?(:redis)
   end
 
-  delegate :create_group, :unread_entries_size, :consumer_info, :claim_entry,
+  delegate :create_group, :entries_size, :consumer_info, :claim_entry,
     :next_unread_entry, :next_pending_entry,
     to: :redis_commands
 

@@ -68,7 +68,7 @@ module RedisIPC
         # Ignores exceptions and only calls when it's a success
         when :on_message
           add_observer do |_, entry, exception|
-            next if exception || entry.nil?
+            next if entry.nil? || exception
 
             handler.call(entry)
           end
@@ -135,9 +135,9 @@ module RedisIPC
 
       def change_availability
         if @task.running?
-          @redis.consumer_is_available(name)
+          @redis.make_consumer_available(name)
         else
-          @redis.consumer_is_unavailable(name)
+          @redis.make_consumer_unavailable(name)
         end
       end
 

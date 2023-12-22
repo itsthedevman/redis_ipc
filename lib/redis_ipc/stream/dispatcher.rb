@@ -43,11 +43,18 @@ module RedisIPC
 
       private
 
-      # noop
+      # noop. Dispatchers do not need to be made "available"
       def change_availability = nil
 
       def read_from_stream
-        # Dispatchers pull from
+        # Along with dispatching the normal unread entries, Dispatchers also implement two failsafe to ensure
+        # all entries are processed.
+        #
+        # Reclaimed entries: Any entry claimed by a consumer but hasn't been processed within a time frame.
+        # Unread entries: Standard workflow entries.
+        # Pending entries: Any entry claimed by the Dispatcher, but hasn't been dispatched yet.
+        #
+        # Reclaimed and pending entries should be a rarity, but its better to handle them than to let them sit
         @redis.next_reclaimed_entry(name) || @redis.next_unread_entry(name) || @redis.next_pending_entry(name)
       end
 

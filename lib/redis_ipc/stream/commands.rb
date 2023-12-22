@@ -21,11 +21,19 @@ module RedisIPC
         @redis_pool = ConnectionPool.new(size: pool_size) { Redis.new(**redis_options) }
       end
 
+      #
+      # Gracefully shutdown the redis pool
+      #
       def shutdown
         redis_pool.shutdown(&:close)
       end
 
-      def unread_entries_size
+      #
+      # Returns the number of entries in a stream
+      #
+      # @return [Integer]
+      #
+      def entries_size
         redis_pool.with { |redis| redis.xlen(stream_name) }
       end
 
@@ -67,7 +75,7 @@ module RedisIPC
       def create_group
         redis_pool.with do |redis|
           # $ is the last entry in the stream
-          redis.xgroup(:create, stream_name, group_name, "$", mkstream: true)
+          redis.xgroup(:create, stream_name, group_name, "0", mkstream: true)
         rescue Redis::CommandError => e
           break if e.message.start_with?("BUSYGROUP")
 
@@ -94,10 +102,24 @@ module RedisIPC
         Entry.from_redis(*response)
       end
 
+      #
+      # Wrapper for #read_from_stream that returns an unread entry
+      #
+      # @param consumer_name [String] The name of the consumer (Dispatcher) whom is claiming this entry
+      #
+      # @return [RedisIPC::Stream::Entry]
+      #
       def next_unread_entry(consumer_name)
         read_from_stream(consumer_name, READ_FROM_STREAM)
       end
 
+      #
+      # Wrapper for #read_from_stream that returns an entry from the consumers PEL
+      #
+      # @param consumer_name [String] The name of the consumer (Consumer) who has already claimed this entry
+      #
+      # @return [RedisIPC::Stream::Entry]
+      #
       def next_pending_entry(consumer_name)
         read_from_stream(consumer_name, READ_FROM_PEL)
       end
@@ -146,7 +168,7 @@ module RedisIPC
       #
       # Claims an entry for a given consumer, adding it to their PEL
       #
-      # @param consumer_name [String]
+      # @param consumer_name [String] The name of the consumer to claim the entry
       # @param entry [RedisIPC::Stream::Entry]
       #
       def claim_entry(consumer_name, entry)
@@ -161,9 +183,9 @@ module RedisIPC
       # This data is managed by RedisIPC itself. Each consumer in the list is added when they start listening
       # and is removed when they stop listening
       #
-      # @param for_group_name [<Type>] <description>
+      # @param for_group_name [String] The name of group that the consumers belong to
       #
-      # @return [<Type>] <description>
+      # @return [Array<String>]
       #
       def available_consumer_names(for_group_name)
         redis_pool.with do |redis|
@@ -173,20 +195,33 @@ module RedisIPC
         end
       end
 
+      #
+      # Clears the array of available consumers for this group
+      #
       def clear_available_consumers
         redis_pool.with { |redis| redis.del(available_redis_consumers_key) }
       end
 
-      def consumer_is_available(name)
+      #
+      # Makes the consumer available for messages by adding it to the available consumers list
+      #
+      # @param consumer_name [String] The name of the consumer
+      #
+      def make_consumer_available(consumer_name)
         redis_pool.with do |redis|
-          redis.lpush(available_redis_consumers_key, name)
+          redis.lpush(available_redis_consumers_key, consumer_name)
         end
       end
 
-      def consumer_is_unavailable(name)
+      #
+      # Makes the consumer unavailable for messages by removing it from the available consumers list
+      #
+      # @param consumer_name [String] The name of the consumer
+      #
+      def make_consumer_unavailable(consumer_name)
         redis_pool.with do |redis|
           # 0 is remove all
-          redis.lrem(available_redis_consumers_key, 0, name)
+          redis.lrem(available_redis_consumers_key, 0, consumer_name)
         end
       end
 
