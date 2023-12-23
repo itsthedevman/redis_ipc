@@ -1,11 +1,8 @@
 # frozen_string_literal: true
 
 describe RedisIPC::Stream::Commands do
+  # Most of these methods used in this spec are defined in here
   include_context "stream"
-
-  # redis_commands is defined in stream_context
-  # along with a lot of methods used in this spec
-  subject(:commands) { redis_commands }
 
   describe "#entries_size" do
     subject { entries_size }
@@ -68,7 +65,7 @@ describe RedisIPC::Stream::Commands do
     subject(:create_group) { redis_commands.create_group }
 
     context "when the stream/group does not exist" do
-      before { destroy_stream }
+      before { redis_commands.delete_stream }
 
       it "creates the stream/group" do
         expect { redis.xinfo(:stream, stream_name) }.to raise_error(Redis::CommandError, "ERR no such key")
@@ -89,6 +86,10 @@ describe RedisIPC::Stream::Commands do
       end
     end
   end
+
+  describe "#destroy_group"
+
+  describe "#delete_stream"
 
   describe "#next_unread_entry" do
     subject(:unread_entry) { redis_commands.next_unread_entry("consumer_1") }
@@ -172,6 +173,178 @@ describe RedisIPC::Stream::Commands do
         "consumer_1" => hash_including("pending" => 0),
         "reclaimer" => hash_including("pending" => 1)
       )
+    end
+  end
+
+  describe "#consumer_info" do
+    subject(:info) { redis_commands.consumer_info }
+
+    context "when there are no consumers" do
+      it { is_expected.to be_empty }
+    end
+
+    context "when there are consumers for our group" do
+      let!(:consumer) { create_consumer }
+
+      it "contains the consumer information" do
+        is_expected.to have_key(consumer.name)
+      end
+    end
+
+    context "when there are consumers for another group" do
+      let!(:consumer) { create_consumer(group: "another_group") }
+
+      subject(:other_info) { redis_commands.consumer_info("another_group") }
+
+      it "returns nothing for our group" do
+        expect(info).to be_empty
+      end
+
+      it "returns data for another group" do
+        expect(other_info).to have_key(consumer.name)
+      end
+    end
+
+    context "when a filter is provided" do
+      let!(:consumer) { create_consumer }
+      let!(:consumer_2) { create_consumer }
+
+      subject(:info) { redis_commands.consumer_info(filter_for: [consumer.name]) }
+
+      it "returns the filtered hash" do
+        expect(info).to have_key(consumer.name)
+        expect(info).not_to have_key(consumer_2.name)
+      end
+    end
+  end
+
+  describe "#claim_entry" do
+    let!(:consumer) { create_consumer }
+    let!(:entry) { add_to_stream }
+
+    subject(:claimed_entry) { redis_commands.claim_entry(consumer.name, entry) }
+
+    before { next_unread_entry("auto_dispatcher") }
+
+    it "assigns the entry to the consumer" do
+      expect(consumer_info_for(consumer.name)).to include("pending" => 0)
+
+      expect(claimed_entry).to eq(entry)
+      expect(consumer_info_for(consumer.name)).to include("pending" => 1)
+    end
+  end
+
+  describe "#available_consumer_names" do
+    subject(:consumer_names) { redis_commands.available_consumer_names }
+
+    context "when there are available consumers" do
+      let!(:consumer) { create_consumer }
+
+      before { consumer.listen }
+
+      it "returns a list including the consumer's name" do
+        is_expected.to eq([consumer.name])
+      end
+    end
+
+    context "when there are no available consumers" do
+      it "returns an empty list" do
+        is_expected.to be_empty
+      end
+    end
+  end
+
+  describe "#clear_available_consumers" do
+    let!(:consumer) { create_consumer }
+
+    subject(:deletion) { redis_commands.clear_available_consumers }
+
+    before { consumer.listen }
+
+    it "deletes the key" do
+      expect(redis_commands.available_consumer_names).to include(consumer.name)
+      expect(deletion).to eq(1)
+      expect(redis_commands.available_consumer_names).to be_empty
+    end
+  end
+
+  describe "#consumer_available?" do
+    let(:consumer) { create_consumer }
+
+    subject(:available) { redis_commands.consumer_available?(consumer.name) }
+
+    context "when the consumer is available" do
+      before { redis_commands.make_consumer_available(consumer.name) }
+
+      it { is_expected.to be true }
+    end
+
+    context "when the consumer is not available" do
+      it { is_expected.to be false }
+    end
+  end
+
+  describe "#make_consumer_available" do
+    let!(:consumer) { create_consumer }
+
+    subject(:consumer_is_now_available) { redis_commands.make_consumer_available(consumer.name) }
+
+    context "when the consumer is not available" do
+      it "is added to the availability list" do
+        expect(redis_commands.consumer_available?(consumer.name)).to be false
+
+        consumer_is_now_available
+
+        expect(redis_commands.consumer_available?(consumer.name)).to be true
+        expect(redis_commands.available_consumer_names).to include(consumer.name)
+      end
+    end
+
+    context "when the consumer is already available" do
+      before { redis_commands.make_consumer_available(consumer.name) }
+
+      it "does nothing" do
+        expect(redis_commands.consumer_available?(consumer.name)).to be true
+        expect(redis_commands.available_consumer_names.size).to eq(1)
+
+        expect { consumer_is_now_available }.not_to raise_error
+
+        expect(redis_commands.available_consumer_names.size).to eq(1)
+        expect(redis_commands.consumer_available?(consumer.name)).to be true
+        expect(redis_commands.available_consumer_names).to include(consumer.name)
+      end
+    end
+  end
+
+  describe "#make_consumer_unavailable" do
+    let!(:consumer) { create_consumer }
+
+    subject(:consumer_is_now_unavailable) { redis_commands.make_consumer_unavailable(consumer.name) }
+
+    context "when the consumer is not available" do
+      it "does nothing" do
+        expect(redis_commands.consumer_available?(consumer.name)).to be false
+
+        consumer_is_now_unavailable
+
+        expect(redis_commands.consumer_available?(consumer.name)).to be false
+        expect(redis_commands.available_consumer_names).not_to include(consumer.name)
+      end
+    end
+
+    context "when the consumer is available" do
+      before { redis_commands.make_consumer_available(consumer.name) }
+
+      it "removes the consumer from the list" do
+        expect(redis_commands.consumer_available?(consumer.name)).to be true
+        expect(redis_commands.available_consumer_names.size).to eq(1)
+
+        consumer_is_now_unavailable
+
+        expect(redis_commands.available_consumer_names.size).to eq(0)
+        expect(redis_commands.consumer_available?(consumer.name)).to be false
+        expect(redis_commands.available_consumer_names).not_to include(consumer.name)
+      end
     end
   end
 end

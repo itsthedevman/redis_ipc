@@ -12,8 +12,9 @@ module RedisIPC
         execution_interval: 0.01
       }.freeze
 
-      attr_reader :name, :stream_name, :group_name
+      attr_reader :name
 
+      delegate :stream_name, :group_name, to: :@redis
       delegate :add_observer, :delete_observer, :count_observers, to: :@task
 
       #
@@ -22,20 +23,17 @@ module RedisIPC
       # this class cannot read messages without them being claimed by this consumer. See Dispatcher
       #
       # @param name [String] The unique name for this consumer to be used in Redis
-      # @param stream [String] The name of the Redis Stream
-      # @param group [String] The name of the group in the Stream
       # @param redis [RedisIPC::Stream::Commands] The redis commands instance used by Stream
       # @param options [Hash] Configuration values for the Consumer. See Consumer::DEFAULTS
       #
-      def initialize(name, stream:, group:, redis:, options: {})
+      def initialize(name, redis:, options: {})
         @name = name.freeze
-        @stream_name = stream.freeze
-        @group_name = group.freeze
+        @redis = redis
 
         check_for_valid_configuration!
 
+        @redis.create_consumer(name)
         @options = DEFAULTS.merge(options).freeze
-        @redis = redis
 
         # This is the workhorse for the consumer
         @task = Concurrent::TimerTask.new(execution_interval: @options[:execution_interval], freeze_on_deref: true) do
@@ -85,14 +83,21 @@ module RedisIPC
       end
 
       #
+      # Returns true if the consumer is listening for entries
+      #
+      # @return [Boolean]
+      #
+      def listening?
+        @task.running?
+      end
+
+      #
       # Starts checking the stream for new messages
       #
       def listen
-        return if @task.running?
+        return if listening?
 
-        @redis.create_group
         @task.execute
-
         change_availability
 
         @task
@@ -106,6 +111,15 @@ module RedisIPC
 
         change_availability
         true
+      end
+
+      #
+      # Returns the inspected object
+      #
+      # @return [String]
+      #
+      def inspect
+        "#<#{self.class}:0x#{object_id} name=\"#{name}\" stream_name=\"#{stream_name}\" group_name=\"#{group_name}\" listening=#{listening?}>"
       end
 
       #
@@ -134,7 +148,7 @@ module RedisIPC
       end
 
       def change_availability
-        if @task.running?
+        if listening?
           @redis.make_consumer_available(name)
         else
           @redis.make_consumer_unavailable(name)

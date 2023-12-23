@@ -59,7 +59,7 @@ module RedisIPC
       end
 
       def available_consumer_names
-        @redis.available_consumer_names(group_name)
+        @redis.available_consumer_names
       end
 
       def check_for_consumers!
@@ -70,7 +70,7 @@ module RedisIPC
 
       def find_load_balanced_consumer
         consumer_names = available_consumer_names
-        busy_consumers = @redis.consumer_info(group_name, consumer_names)
+        busy_consumers = @redis.consumer_info(group_name, filter_for: consumer_names)
 
         available_consumers = consumer_names.sort do |a, b|
           load_balance_consumer(a, b, busy_consumers: busy_consumers)

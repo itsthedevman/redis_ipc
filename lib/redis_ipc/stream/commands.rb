@@ -13,18 +13,36 @@ module RedisIPC
 
       attr_reader :stream_name, :group_name, :redis_pool
 
-      def initialize(stream_name, group_name, pool_size: 10, redis_options: {})
+      def initialize(stream_name, group_name, pool_size: 10, logger: nil, reset: false, redis_options: {})
         @stream_name = stream_name
         @group_name = group_name
+        @logger = logger
 
         redis_options = REDIS_DEFAULTS.merge(redis_options)
         @redis_pool = ConnectionPool.new(size: pool_size) { Redis.new(**redis_options) }
+
+        log("Initialized with max_pool_size of #{pool_size}")
+
+        if reset
+          destroy_group
+          delete_stream
+        end
+
+        create_group
+      end
+
+      def log(content)
+        return if @logger.nil?
+
+        @logger.info("<commands::#{stream_name}:#{group_name}> #{content}")
       end
 
       #
       # Gracefully shutdown the redis pool
       #
       def shutdown
+        log("Shutting down")
+
         redis_pool.shutdown(&:close)
       end
 
@@ -45,6 +63,8 @@ module RedisIPC
       # @return [String] Redis's internal Stream entry ID
       #
       def add_to_stream(entry)
+        log("Adding entry: #{entry}")
+
         redis_pool.with { |redis| redis.xadd(stream_name, entry.to_h) }
       end
 
@@ -54,15 +74,15 @@ module RedisIPC
       # @param id [String] The Redis Stream ID
       #
       def acknowledge_and_remove(id)
+        log("Acknowledging: #{id}")
+
         redis_pool.with do |redis|
-          begin
+          suppress(Redis::CommandError) do
             redis.xack(stream_name, group_name, id)
-          rescue Redis::CommandError
           end
 
-          begin
+          suppress(Redis::CommandError) do
             redis.xdel(stream_name, id)
-          rescue Redis::CommandError
           end
         end
 
@@ -73,13 +93,51 @@ module RedisIPC
       # Checks if the Stream group has been created and creates it if it hasn't
       #
       def create_group
-        redis_pool.with do |redis|
-          # $ is the last entry in the stream
-          redis.xgroup(:create, stream_name, group_name, "0", mkstream: true)
-        rescue Redis::CommandError => e
-          break if e.message.start_with?("BUSYGROUP")
+        log("Creating group")
 
-          raise e
+        redis_pool.with do |redis|
+          suppress(Redis::CommandError) do
+            redis.xgroup(:create, stream_name, group_name, "$", mkstream: true)
+          end
+        end
+      end
+
+      #
+      # Removes the group from the stream
+      #
+      def destroy_group
+        log("Destroying group")
+
+        redis_pool.with do |redis|
+          suppress(Redis::CommandError) do
+            redis.xgroup(:destroy, stream_name, group_name)
+          end
+
+          redis.del(available_redis_consumers_key)
+        end
+      end
+
+      #
+      # Deletes the stream from Redis
+      #
+      def delete_stream
+        log("Destroying stream")
+
+        redis_pool.with do |redis|
+          redis.del(stream_name)
+        end
+      end
+
+      #
+      # Creates a consumer in the stream
+      #
+      # @param consumer_name [String] The name of the consumer
+      #
+      def create_consumer(consumer_name)
+        log("Creating consumer #{consumer_name}")
+
+        redis_pool.with do |redis|
+          redis.xgroup(:createconsumer, stream_name, group_name, consumer_name)
         end
       end
 
@@ -93,13 +151,14 @@ module RedisIPC
       # @return [RedisIPC::Stream::Entry]
       #
       def read_from_stream(consumer_name, read_id)
-        response = redis_pool.with do |redis|
+        result = redis_pool.with do |redis|
           redis.xreadgroup(group_name, consumer_name, stream_name, read_id, count: 1)&.values&.flatten
         end
 
-        return if response.blank?
+        return if result.blank?
+        log("#{consumer_name} read from stream: #{result}")
 
-        Entry.from_redis(*response)
+        Entry.from_redis(*result)
       end
 
       #
@@ -132,7 +191,7 @@ module RedisIPC
       # @param count [Integer] The number of entries to read
       #
       def next_reclaimed_entry(consumer_name, min_idle_time: 10.seconds)
-        response = redis_pool.with do |redis|
+        result = redis_pool.with do |redis|
           # "0-0" is a special ID, means at the start
           redis.xautoclaim(
             stream_name, group_name,
@@ -143,9 +202,10 @@ module RedisIPC
           )["entries"].first
         end
 
-        return if response.blank?
+        return if result.blank?
 
-        Entry.from_redis(*response)
+        log("#{consumer_name} reclaimed: #{result}")
+        Entry.from_redis(*result)
       end
 
       #
@@ -153,13 +213,15 @@ module RedisIPC
       #
       # @param for_group_name [String] The group the consumers belong to
       #
-      def consumer_info(for_group_name = group_name, filter_for_consumers = [])
+      def consumer_info(for_group_name = group_name, filter_for: [])
+        log("Reading consumer info for #{for_group_name}")
+
         result = redis_pool.with do |redis|
           redis.xinfo(:consumers, stream_name, for_group_name)
         end
 
-        if filter_for_consumers.present?
-          result.select! { |consumer| filter_for_consumers.include?(consumer["name"]) }
+        if filter_for.present?
+          result.select! { |consumer| filter_for.include?(consumer["name"]) }
         end
 
         result.index_by { |consumer| consumer["name"] }
@@ -172,33 +234,51 @@ module RedisIPC
       # @param entry [RedisIPC::Stream::Entry]
       #
       def claim_entry(consumer_name, entry)
-        redis_pool.with do |redis|
+        result = redis_pool.with do |redis|
           # 0 is minimum idle time
-          redis.xclaim(stream_name, group_name, consumer_name, 0, entry.redis_id)
+          redis.xclaim(stream_name, group_name, consumer_name, 0, entry.redis_id)&.first
         end
+
+        return if result.blank?
+        log("#{consumer_name} claimed entry: #{result}")
+
+        Entry.from_redis(*result)
       end
 
       #
       # Returns all available consumer names for a group.
-      # This data is managed by RedisIPC itself. Each consumer in the list is added when they start listening
+      # Each consumer in the list is added when they start listening
       # and is removed when they stop listening
       #
       # @param for_group_name [String] The name of group that the consumers belong to
       #
       # @return [Array<String>]
       #
-      def available_consumer_names(for_group_name)
+      def available_consumer_names
+        log("Reading available consumers")
+
         redis_pool.with do |redis|
           # 0 is start index
           # -1 is end index (like array)
-          redis.lrange(available_redis_consumers_key(for_group_name), 0, -1)
+          redis.lrange(available_redis_consumers_key, 0, -1)
         end
+      end
+
+      def consumer_available?(name)
+        result = redis_pool.with do |redis|
+          # redis-rb does not have internal support for lpos. However, they do delegate missing methods
+          redis.lpos(available_redis_consumers_key, name, "RANK", 1)
+        end
+
+        !result.nil?
       end
 
       #
       # Clears the array of available consumers for this group
       #
       def clear_available_consumers
+        log("Cleared available consumers")
+
         redis_pool.with { |redis| redis.del(available_redis_consumers_key) }
       end
 
@@ -208,6 +288,10 @@ module RedisIPC
       # @param consumer_name [String] The name of the consumer
       #
       def make_consumer_available(consumer_name)
+        return if consumer_available?(consumer_name)
+
+        log("#{consumer_name} has been made available")
+
         redis_pool.with do |redis|
           redis.lpush(available_redis_consumers_key, consumer_name)
         end
@@ -219,6 +303,10 @@ module RedisIPC
       # @param consumer_name [String] The name of the consumer
       #
       def make_consumer_unavailable(consumer_name)
+        return unless consumer_available?(consumer_name)
+
+        log("#{consumer_name} has been made unavailable")
+
         redis_pool.with do |redis|
           # 0 is remove all
           redis.lrem(available_redis_consumers_key, 0, consumer_name)
@@ -227,8 +315,8 @@ module RedisIPC
 
       private
 
-      def available_redis_consumers_key(for_group_name = group_name)
-        "#{stream_name}:#{for_group_name}:available_consumers"
+      def available_redis_consumers_key
+        "#{stream_name}:#{group_name}:available_consumers"
       end
     end
   end

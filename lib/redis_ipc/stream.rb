@@ -27,6 +27,7 @@ module RedisIPC
       options = {
         pool_size: 10,
         max_pool_size: nil,
+        reset: false,
         ledger: Ledger::DEFAULTS,
         consumer: Ledger::Consumer::DEFAULTS,
         dispatcher: Dispatcher::DEFAULTS
@@ -49,9 +50,14 @@ module RedisIPC
         (options.dig(:dispatcher, :pool_size) * 2)
       )
 
-      @redis = Commands.new(stream_name, group_name, pool_size: max_pool_size, redis_options: redis_options)
-      @ledger = Ledger.new(options[:ledger])
+      @redis = Commands.new(
+        stream_name, group_name,
+        pool_size: max_pool_size,
+        reset: options[:reset],
+        redis_options: redis_options
+      )
 
+      @ledger = Ledger.new(options[:ledger])
       @consumers = create_consumers(options[:consumer])
       @dispatchers = create_dispatchers(options[:dispatcher])
 
@@ -88,7 +94,6 @@ module RedisIPC
 
     def fulfill(entry:, content:)
       check_for_ledger!
-
       @redis.add_to_stream(entry.fulfilled(content: content))
 
       nil
@@ -98,7 +103,6 @@ module RedisIPC
 
     def reject(entry:, content:)
       check_for_ledger!
-
       @redis.add_to_stream(entry.rejected(content: content))
 
       nil
@@ -132,14 +136,8 @@ module RedisIPC
 
     def create_consumers(options)
       options[:pool_size].times.map do |index|
-        consumer = Ledger::Consumer.new(
-          "#{group_name}_consumer_#{index}",
-          stream: stream_name,
-          group: group_name,
-          redis: @redis,
-          ledger: @ledger,
-          options: options
-        )
+        name = "#{stream_name}:#{group_name}:consumer:#{index}"
+        consumer = Ledger::Consumer.new(name, redis: @redis, ledger: @ledger, options: options)
 
         consumer.add_callback(:on_error, self, :handle_exception)
         consumer.add_callback(:on_message, self, :handle_entry)
@@ -151,14 +149,8 @@ module RedisIPC
 
     def create_dispatchers(options)
       options[:pool_size].times.map do |index|
-        dispatcher = Dispatcher.new(
-          "#{group_name}_dispatcher_#{index}",
-          stream: stream_name,
-          group: group_name,
-          redis: @redis,
-          ledger: @ledger,
-          options: options
-        )
+        name = "#{stream_name}:#{group_name}:dispatcher:#{index}"
+        dispatcher = Ledger::Dispatcher.new(name, redis: @redis, ledger: @ledger, options: options)
 
         dispatcher.add_callback(:on_error, self, :handle_exception)
 
@@ -168,11 +160,7 @@ module RedisIPC
     end
 
     def track_and_send(content, destination_group)
-      entry = Entry.new(
-        content: content,
-        source_group: group_name,
-        destination_group: destination_group
-      )
+      entry = Entry.new(content: content, source_group: group_name, destination_group: destination_group)
 
       # The entry must be added to the ledger before adding to the stream as that, in testing, the consumers can
       # get ahold of the entry before the ledger has everything ready.
