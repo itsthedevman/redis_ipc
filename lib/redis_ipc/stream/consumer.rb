@@ -8,7 +8,7 @@ module RedisIPC
         # Any consumers created for a group will only process entries for their group
         pool_size: 10,
 
-        # How often does the consumer check for new messages
+        # How often does the consumer check for new entries
         execution_interval: 0.01
       }.freeze
 
@@ -20,7 +20,7 @@ module RedisIPC
       #
       # Creates a new Consumer for the given stream.
       # This class is configured to read from its own Pending Entries List by default. This means that
-      # this class cannot read messages without them being claimed by this consumer. See Dispatcher
+      # this class cannot read entries without them being claimed by this consumer. See Dispatcher
       #
       # @param name [String] The unique name for this consumer to be used in Redis
       # @param redis [RedisIPC::Stream::Commands] The redis commands instance used by Stream
@@ -70,7 +70,7 @@ module RedisIPC
 
             handler.call(entry)
           end
-        # Ignores successful messages and only calls on exceptions
+        # Ignores successful entries and only calls on exceptions
         when :on_error
           add_observer do |_, _e, exception|
             next unless exception
@@ -92,7 +92,7 @@ module RedisIPC
       end
 
       #
-      # Starts checking the stream for new messages
+      # Starts checking the stream for new entries
       #
       def listen
         return if listening?
@@ -104,7 +104,7 @@ module RedisIPC
       end
 
       #
-      # Stops checking the stream for new messages
+      # Stops checking the stream for new entries
       #
       def stop_listening
         @task.shutdown
@@ -156,7 +156,7 @@ module RedisIPC
       end
 
       def read_from_stream
-        @redis.read_next_pending(name)
+        @redis.next_pending_entry(name)
       end
 
       def acknowledge_and_remove(entry)

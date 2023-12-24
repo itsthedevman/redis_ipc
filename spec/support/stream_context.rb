@@ -6,7 +6,7 @@ RSpec.shared_context("stream") do
   let!(:logger) { Logger.new($stdout) }
 
   let!(:redis_commands) do
-    # NOTE: Reset here is deleting the group and stream
+    # NOTE: Reset here is deleting the group
     RedisIPC::Stream::Commands.new(stream_name, group_name, logger: logger, reset: true)
   end
 
@@ -22,7 +22,6 @@ RSpec.shared_context("stream") do
   end
 
   after do
-    redis_commands.destroy_group
     redis_commands.delete_stream
 
     # Forcing the checkin will silence the error

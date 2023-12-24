@@ -155,7 +155,7 @@ module RedisIPC
       #
       # Reads an entry into the group using XREADGROUP
       #
-      # @param consumer_name [String] The consumer reading the message
+      # @param consumer_name [String] The consumer reading the entry
       # @param read_id [String] The ID or special ID to start reading from
       # @param count [Integer] The number of entries to read back
       #
@@ -167,7 +167,7 @@ module RedisIPC
         end
 
         return if result.blank?
-        log("#{consumer_name} read from stream: #{result}")
+        log("Consumed entry from stream for #{consumer_name}: #{result}")
 
         Entry.from_redis(*result)
       end
@@ -215,7 +215,7 @@ module RedisIPC
 
         return if result.blank?
 
-        log("#{consumer_name} reclaimed: #{result}")
+        log("Entry was reclaimed by #{consumer_name}: #{result}")
         Entry.from_redis(*result)
       end
 
@@ -251,7 +251,7 @@ module RedisIPC
         end
 
         return if result.blank?
-        log("#{consumer_name} claimed entry: #{result}")
+        log("Entry was claimed by #{consumer_name}: #{result}")
 
         Entry.from_redis(*result)
       end
@@ -276,6 +276,8 @@ module RedisIPC
       end
 
       def consumer_available?(name)
+        log("Checking if consumer #{name} is available")
+
         result = redis_pool.with do |redis|
           # redis-rb does not have internal support for lpos. However, they do delegate missing methods
           redis.lpos(available_redis_consumers_key, name, "RANK", 1)
@@ -294,14 +296,14 @@ module RedisIPC
       end
 
       #
-      # Makes the consumer available for messages by adding it to the available consumers list
+      # Makes the consumer available for receiving entries by adding it to the available consumers list
       #
       # @param consumer_name [String] The name of the consumer
       #
       def make_consumer_available(consumer_name)
         return if consumer_available?(consumer_name)
 
-        log("#{consumer_name} has been made available")
+        log("Consumer #{consumer_name} is now available")
 
         redis_pool.with do |redis|
           redis.lpush(available_redis_consumers_key, consumer_name)
@@ -309,14 +311,14 @@ module RedisIPC
       end
 
       #
-      # Makes the consumer unavailable for messages by removing it from the available consumers list
+      # Makes the consumer unavailable for receiving entries by removing it from the available consumers list
       #
       # @param consumer_name [String] The name of the consumer
       #
       def make_consumer_unavailable(consumer_name)
         return unless consumer_available?(consumer_name)
 
-        log("#{consumer_name} has been made unavailable")
+        log("Consumer #{consumer_name} is no longer available")
 
         redis_pool.with do |redis|
           # 0 is remove all

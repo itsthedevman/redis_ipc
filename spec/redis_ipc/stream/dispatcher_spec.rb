@@ -59,21 +59,21 @@ describe RedisIPC::Stream::Dispatcher do
     subject(:balanced_consumer_name) { dispatcher.send(:find_load_balanced_consumer) }
 
     before do
-      # Remove the default functionality so we can use the dispatcher to listen for messages
+      # Remove the default functionality so we can use the dispatcher to listen for entries
       dispatcher.delete_observer(dispatcher)
     end
 
-    # zero pending messages
-    # 2 consumers have messages, 1 does not
-    # All consumers have messages, 2 have less than the other
-    # All 3 consumers have the same number of messages
-    context "when there are no pending messages" do
+    # zero pending entries
+    # 2 consumers have entries, 1 does not
+    # All consumers have entries, 2 have less than the other
+    # All 3 consumers have the same number of entries
+    context "when there are no pending entries" do
       it "will pick the first consumer created" do
         expect(balanced_consumer_name).to eq("test_consumer_0")
       end
     end
 
-    context "when some consumers have pending messages and some don't" do
+    context "when some consumers have pending entries and some don't" do
       let(:consumer_sampler) { consumers.sample(3) } # Leaves 2 consumers
 
       before do
@@ -82,13 +82,13 @@ describe RedisIPC::Stream::Dispatcher do
         end
       end
 
-      it "will pick a consumer with no messages" do
+      it "will pick a consumer with no entries" do
         (free_consumer_1, free_consumer_2) = consumers - consumer_sampler
         expect(balanced_consumer_name).to eq(free_consumer_1.name) || eq(free_consumer_2.name)
       end
     end
 
-    context "when all consumers have messages, but some have less than others" do
+    context "when all consumers have entries, but some have less than others" do
       before do
         consumers.shuffle.each_with_index do |consumer, index|
           # Using the index to ensure a the proper ordering to check against
@@ -98,14 +98,14 @@ describe RedisIPC::Stream::Dispatcher do
         end
       end
 
-      it "will pick a consumer with the least amount of pending messages" do
+      it "will pick a consumer with the least amount of pending entries" do
         consumer = consumer_only_stats(consumer_names).min_by { |c| c["pending"] }
 
         expect(balanced_consumer_name).to eq(consumer["name"])
       end
     end
 
-    context "when all consumers have equal pending messages" do
+    context "when all consumers have equal pending entries" do
       before do
         consumers.shuffle.each do |consumer|
           sleep(rand / 1000) # We're working with the milliseconds, this doesn't need to delay very long
@@ -115,7 +115,7 @@ describe RedisIPC::Stream::Dispatcher do
       end
 
       it "will pick an active consumer who has idled the longest" do
-        # I know all of the consumers have pending messages so I can skip that
+        # I know all of the consumers have pending entries so I can skip that
         consumer = consumer_only_stats(consumer_names).min { |a, b| b["idle"] <=> a["idle"] }
 
         expect(balanced_consumer_name).to eq(consumer["name"])

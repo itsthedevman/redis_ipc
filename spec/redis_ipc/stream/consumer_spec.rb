@@ -36,7 +36,7 @@ describe RedisIPC::Stream::Consumer do
   end
 
   describe "#listen" do
-    context "when a messages is dispatched to this consumer" do
+    context "when an entry is dispatched to this consumer" do
       it "creates a Entry instance and broadcasts to all observers without acknowledging it" do
         content = Faker::String.random
 

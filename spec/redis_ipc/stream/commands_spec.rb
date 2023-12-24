@@ -151,7 +151,7 @@ describe RedisIPC::Stream::Commands do
   describe "#next_reclaimed_entry" do
     subject(:next_reclaimed_entry) { redis_commands.next_reclaimed_entry("reclaimer", min_idle_time: 0) }
 
-    it "claims the message to the dispatcher" do
+    it "claims the entry to the dispatcher" do
       expect(entries_size).to eq(0)
 
       entry = add_to_stream

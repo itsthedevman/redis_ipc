@@ -52,7 +52,7 @@ module RedisIPC
 
       @redis = Commands.new(
         stream_name, group_name,
-        pool_size: max_pool_size,
+        max_pool_size: max_pool_size,
         reset: options[:reset],
         redis_options: redis_options
       )
@@ -83,7 +83,7 @@ module RedisIPC
       # Using a Promise because of the functionality it provides which simplifies this code
       promise = Concurrent::Promise.execute { track_and_send(content, to) }
 
-      # Wait for us to get a message back, or timeout
+      # Wait for us to get an entry back, or timeout
       promise.wait
 
       # If it was rejected for any reason, raise it so the caller can handle it
@@ -137,12 +137,12 @@ module RedisIPC
     def create_consumers(options)
       options[:pool_size].times.map do |index|
         name = "#{stream_name}:#{group_name}:consumer:#{index}"
-        consumer = Ledger::Consumer.new(name, redis: @redis, ledger: @ledger, options: options)
 
+        consumer = Ledger::Consumer.new(name, redis: @redis, ledger: @ledger, options: options)
         consumer.add_callback(:on_error, self, :handle_exception)
         consumer.add_callback(:on_message, self, :handle_entry)
-
         consumer.listen
+
         consumer
       end
     end
@@ -150,11 +150,11 @@ module RedisIPC
     def create_dispatchers(options)
       options[:pool_size].times.map do |index|
         name = "#{stream_name}:#{group_name}:dispatcher:#{index}"
-        dispatcher = Ledger::Dispatcher.new(name, redis: @redis, ledger: @ledger, options: options)
 
+        dispatcher = Dispatcher.new(name, redis: @redis, options: options)
         dispatcher.add_callback(:on_error, self, :handle_exception)
-
         dispatcher.listen
+
         dispatcher
       end
     end

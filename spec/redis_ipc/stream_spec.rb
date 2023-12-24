@@ -18,7 +18,7 @@ describe RedisIPC::Stream do
 
   describe "#connect" do
     context "when #on_message is nil" do
-      before { stream.on_message = nil }
+      before { stream.instance_variable_set(:@on_message, nil) }
 
       it "raises an error" do
         expect { stream.connect }.to raise_error(
@@ -29,7 +29,7 @@ describe RedisIPC::Stream do
     end
 
     context "when #on_error is nil" do
-      before { stream.on_error = nil }
+      before { stream.instance_variable_set(:@on_error, nil) }
 
       it "raises an error" do
         expect { stream.connect }.to raise_error(
@@ -77,7 +77,7 @@ describe RedisIPC::Stream do
 
     after { other_stream.disconnect }
 
-    context "when a valid message is sent" do
+    context "when a valid entry is sent" do
       it "receives a response" do
         expect(stream.send(content: "Hello", to: "other_group")).to eq("Hello back")
       end

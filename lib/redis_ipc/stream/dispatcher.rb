@@ -14,10 +14,9 @@ module RedisIPC
         execution_interval: 0.01
       }.freeze
 
-      def initialize(name, ledger:, **)
+      def initialize(name, **)
         super(name, options: DEFAULTS, **)
 
-        @ledger = ledger
         check_for_consumers!
       end
 
@@ -93,8 +92,8 @@ module RedisIPC
         return MOVE_AHEAD if consumer_a_is_free
         return MOVE_BEHIND if consumer_b_is_free
 
-        # Sorts if either don't have pending messages
-        # Only continues if both consumers have the same number of messages, but greater than 0
+        # Sorts if either don't have pending entries
+        # Only continues if both consumers have the same number of entries, but greater than 0
         consumer_a_pending = consumer_a_info&.fetch("pending", 0)
         consumer_b_pending = consumer_b_info&.fetch("pending", 0)
 

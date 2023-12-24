@@ -4,7 +4,7 @@ module RedisIPC
   class Stream
     class Ledger
       #
-      # A consumer that only consumes messages that are registered with the ledger
+      # A consumer that only consumes entries that are registered with the ledger
       #
       # @note It felt better to me to let Consumer be generic
       #
