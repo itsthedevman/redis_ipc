@@ -13,24 +13,35 @@ module RedisIPC
 
       attr_reader :stream_name, :group_name, :redis_pool
 
-      def initialize(stream_name, group_name, pool_size: 10, logger: nil, reset: false, redis_options: {})
+      #
+      # A centralized location that holds all of the various Redis commands needed to interact with a stream
+      #
+      # @param stream_name [String] The name of the Stream
+      # @param group_name [String] The group name to use within the Stream
+      # @param max_pool_size [Integer] The maximum number of Redis connections
+      # @param logger [nil, Logger] A logger instance. If provided, logs will be appended on commands
+      # @param reset [Boolean] Recreates the group if true
+      # @param redis_options [Hash] The connection options passed into the Redis client
+      #
+      def initialize(stream_name, group_name, max_pool_size: 10, logger: nil, reset: false, redis_options: {})
         @stream_name = stream_name
         @group_name = group_name
         @logger = logger
 
         redis_options = REDIS_DEFAULTS.merge(redis_options)
-        @redis_pool = ConnectionPool.new(size: pool_size) { Redis.new(**redis_options) }
+        @redis_pool = ConnectionPool.new(size: max_pool_size) { Redis.new(**redis_options) }
 
-        log("Initialized with max_pool_size of #{pool_size}")
+        log("Initialized with max_pool_size of #{max_pool_size}")
 
-        if reset
-          destroy_group
-          delete_stream
-        end
-
+        destroy_group if reset
         create_group
       end
 
+      #
+      # Logs content to a logger instance if one is defined
+      #
+      # @param content [Any]
+      #
       def log(content)
         return if @logger.nil?
 
