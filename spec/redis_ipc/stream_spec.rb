@@ -125,7 +125,7 @@ describe RedisIPC::Stream do
 
     after { other_stream.disconnect }
 
-    context "when a valid entry is sent" do
+    context "when an entry is sent" do
       it "receives a response" do
         expect(stream.send(content: "Hello", to: "other_group")).to eq("Hello back")
       end
