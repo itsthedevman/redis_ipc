@@ -11,7 +11,7 @@ module RedisIPC
       READ_FROM_PEL = "0"
       READ_FROM_STREAM = ">"
 
-      attr_reader :stream_name, :group_name, :redis_pool
+      attr_reader :stream_name, :group_name, :redis_pool, :logger
 
       #
       # A centralized location that holds all of the various Redis commands needed to interact with a stream
@@ -20,10 +20,9 @@ module RedisIPC
       # @param group_name [String] The group name to use within the Stream
       # @param max_pool_size [Integer] The maximum number of Redis connections
       # @param logger [nil, Logger] A logger instance. If provided, logs will be appended on commands
-      # @param reset [Boolean] Recreates the group if true
       # @param redis_options [Hash] The connection options passed into the Redis client
       #
-      def initialize(stream_name, group_name, max_pool_size: 10, logger: nil, reset: false, redis_options: {})
+      def initialize(stream_name, group_name, max_pool_size: 10, logger: nil, redis_options: {})
         @stream_name = stream_name
         @group_name = group_name
         @logger = logger
@@ -33,7 +32,7 @@ module RedisIPC
 
         log("Initialized with max_pool_size of #{max_pool_size}")
 
-        destroy_group if reset
+        destroy_group
         create_group
       end
 
@@ -43,9 +42,7 @@ module RedisIPC
       # @param content [Any]
       #
       def log(content)
-        return if @logger.nil?
-
-        @logger.info("<commands::#{stream_name}:#{group_name}> #{content}")
+        @logger&.debug("<#{stream_name}:#{group_name}> #{content}")
       end
 
       #
@@ -71,12 +68,15 @@ module RedisIPC
       #
       # @param entry [RedisIPC::Stream::Entry]
       #
-      # @return [String] Redis's internal Stream entry ID
+      # @return [RedisIPC::Stream::Entry]
       #
       def add_to_stream(entry)
-        log("Adding entry: #{entry}")
+        redis_id = redis_pool.with { |redis| redis.xadd(stream_name, entry.to_h) }
+        entry = entry.with(redis_id: redis_id)
 
-        redis_pool.with { |redis| redis.xadd(stream_name, entry.to_h) }
+        log("Adding entry:\n#{entry}")
+
+        entry
       end
 
       #
@@ -167,7 +167,6 @@ module RedisIPC
         end
 
         return if result.blank?
-        log("Consumed entry from stream for #{consumer_name}: #{result}")
 
         Entry.from_redis(*result)
       end
@@ -215,27 +214,7 @@ module RedisIPC
 
         return if result.blank?
 
-        log("Entry was reclaimed by #{consumer_name}: #{result}")
         Entry.from_redis(*result)
-      end
-
-      #
-      # Gets information about the stream's consumers for a given group
-      #
-      # @param for_group_name [String] The group the consumers belong to
-      #
-      def consumer_info(for_group_name = group_name, filter_for: [])
-        log("Reading consumer info for #{for_group_name}")
-
-        result = redis_pool.with do |redis|
-          redis.xinfo(:consumers, stream_name, for_group_name)
-        end
-
-        if filter_for.present?
-          result.select! { |consumer| filter_for.include?(consumer["name"]) }
-        end
-
-        result.index_by { |consumer| consumer["name"] }
       end
 
       #
@@ -251,9 +230,25 @@ module RedisIPC
         end
 
         return if result.blank?
-        log("Entry was claimed by #{consumer_name}: #{result}")
 
         Entry.from_redis(*result)
+      end
+
+      #
+      # Gets information about the stream's consumers for a given group
+      #
+      # @param for_group_name [String] The group the consumers belong to
+      #
+      def consumer_info(for_group_name = group_name, filter_for: [])
+        result = redis_pool.with do |redis|
+          redis.xinfo(:consumers, stream_name, for_group_name)
+        end
+
+        if filter_for.present?
+          result.select! { |consumer| filter_for.include?(consumer["name"]) }
+        end
+
+        result.index_by { |consumer| consumer["name"] }
       end
 
       #
@@ -266,8 +261,6 @@ module RedisIPC
       # @return [Array<String>]
       #
       def available_consumer_names
-        log("Reading available consumers")
-
         redis_pool.with do |redis|
           # 0 is start index
           # -1 is end index (like array)
@@ -276,8 +269,6 @@ module RedisIPC
       end
 
       def consumer_available?(name)
-        log("Checking if consumer #{name} is available")
-
         result = redis_pool.with do |redis|
           # redis-rb does not have internal support for lpos. However, they do delegate missing methods
           redis.lpos(available_redis_consumers_key, name, "RANK", 1)

@@ -6,8 +6,7 @@ RSpec.shared_context("stream") do
   let!(:logger) { Logger.new($stdout) }
 
   let!(:redis_commands) do
-    # NOTE: Reset here is deleting the group
-    RedisIPC::Stream::Commands.new(stream_name, group_name, logger: logger, reset: true)
+    RedisIPC::Stream::Commands.new(stream_name, group_name, logger: logger)
   end
 
   let(:redis_pool) { redis_commands.redis_pool }
@@ -47,8 +46,7 @@ RSpec.shared_context("stream") do
   end
 
   def add_to_stream(entry = example_entry, redis: redis_commands)
-    redis_id = redis.add_to_stream(entry)
-    entry.with(redis_id: redis_id)
+    redis.add_to_stream(entry)
   end
 
   def consumer_info_for(consumer_name)
@@ -62,10 +60,8 @@ RSpec.shared_context("stream") do
       destination_group: consumer.group_name
     )
 
-    id = add_to_stream(entry)
-    entry = entry.with(redis_id: id)
-
-    redis_commands.read_from_stream(dispatcher&.name || "auto_dispatcher", ">")
+    add_to_stream(entry)
+    entry = redis_commands.next_unread_entry(dispatcher&.name || "auto_dispatcher")
     claim_entry(consumer.name, entry)
 
     entry

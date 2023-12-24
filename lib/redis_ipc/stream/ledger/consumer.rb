@@ -16,8 +16,7 @@ module RedisIPC
 
         def check_for_entries
           entry = read_from_stream
-          return if entry.nil?
-          return if group_name != entry.destination_group
+          return if invalid?(entry)
 
           ledger_entry = @ledger[entry]
           is_a_request = ledger_entry.nil? && entry.status == "pending"
@@ -47,6 +46,8 @@ module RedisIPC
         private
 
         def process_request(entry)
+          log("Processing entry as request:\n#{entry}")
+
           # Hook into TimerTask to notify the observers manually before next execution. See above
           @task.instance_exec(entry) do |entry|
             # Concurrent::TimerTask passes [time, result, exception]
@@ -55,6 +56,8 @@ module RedisIPC
         end
 
         def process_response(entry, ledger_entry)
+          log("Processing entry as response:\n#{entry}")
+
           # ledger_entry#mailbox is type Concurrent::MVar. Currently Stream#track_and_send is waiting for a value
           # to be stored in here. Once this happens, that thread will receive this value and return it to the caller
           ledger_entry.mailbox.put(entry.content)

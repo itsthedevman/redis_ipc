@@ -13,7 +13,7 @@ describe RedisIPC::Stream do
   end
 
   after do
-    stream.disconnect
+    stream.disconnect if stream.connected?
   end
 
   describe "#connect" do
@@ -57,7 +57,55 @@ describe RedisIPC::Stream do
     end
   end
 
-  describe "#disconnect"
+  describe "#connected?" do
+    subject(:connected?) { stream.connected? }
+
+    context "when the stream is not connected" do
+      it { is_expected.to be false }
+    end
+
+    context "when the stream is connected" do
+      before { stream.connect }
+
+      it { is_expected.to be true }
+    end
+  end
+
+  describe "#disconnect" do
+    subject(:disconnection_result) { stream.disconnect }
+
+    context "when the stream is connected" do
+      before { stream.connect }
+
+      it "stops the connections" do
+        expect(stream.instance_variable_get(:@consumers)).not_to be_nil
+        expect(stream.instance_variable_get(:@dispatchers)).not_to be_nil
+        expect(stream.instance_variable_get(:@ledger)).not_to be_nil
+
+        expect(disconnection_result).to eq(stream)
+        expect(stream.connected?).to be false
+
+        expect(stream.instance_variable_get(:@consumers)).to be_nil
+        expect(stream.instance_variable_get(:@dispatchers)).to be_nil
+        expect(stream.instance_variable_get(:@ledger)).to be_nil
+      end
+    end
+
+    context "when the stream is not connected" do
+      it "does nothing" do
+        expect(stream.instance_variable_get(:@consumers)).to be_nil
+        expect(stream.instance_variable_get(:@dispatchers)).to be_nil
+        expect(stream.instance_variable_get(:@ledger)).to be_nil
+
+        expect(disconnection_result).to eq(stream)
+        expect(stream.connected?).to be false
+
+        expect(stream.instance_variable_get(:@consumers)).to be_nil
+        expect(stream.instance_variable_get(:@dispatchers)).to be_nil
+        expect(stream.instance_variable_get(:@ledger)).to be_nil
+      end
+    end
+  end
 
   describe "Sending/Receiving" do
     subject!(:other_stream) { described_class.new(stream_name, "other_group") }
@@ -71,8 +119,8 @@ describe RedisIPC::Stream do
         puts(message: exception.message, backtrace: exception.backtrace)
       end
 
-      other_stream.connect
-      stream.connect
+      other_stream.connect(logger: logger)
+      stream.connect(logger: logger)
     end
 
     after { other_stream.disconnect }

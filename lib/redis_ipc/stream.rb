@@ -21,17 +21,17 @@ module RedisIPC
       @on_error = block
     end
 
-    def connect(options: {}, redis_options: {})
+    def connect(redis_options: {}, **options)
       check_for_valid_configuration!
 
       options = {
+        logger: nil,
         pool_size: 10,
         max_pool_size: nil,
-        reset: false,
         ledger: Ledger::DEFAULTS,
         consumer: Ledger::Consumer::DEFAULTS,
         dispatcher: Dispatcher::DEFAULTS
-      }.merge(options)
+      }.deep_merge(options)
 
       #
       # The redis pool is shared between the stream, all consumers, and all dispatchers.
@@ -53,8 +53,8 @@ module RedisIPC
       @redis = Commands.new(
         stream_name, group_name,
         max_pool_size: max_pool_size,
-        reset: options[:reset],
-        redis_options: redis_options
+        redis_options: redis_options,
+        **options.slice(:logger, :reset)
       )
 
       @ledger = Ledger.new(options[:ledger])
@@ -64,10 +64,15 @@ module RedisIPC
       self
     end
 
+    def connected?
+      !@consumers.nil? && !@dispatchers.nil?
+    end
+
     def disconnect
-      @dispatchers.each(&:stop_listening)
-      @consumers.each(&:stop_listening)
-      @redis.shutdown
+      # #connect might've not been called...
+      @dispatchers&.each(&:stop_listening)
+      @consumers&.each(&:stop_listening)
+      @redis&.shutdown
 
       @dispatchers = nil
       @consumers = nil
@@ -136,7 +141,7 @@ module RedisIPC
 
     def create_consumers(options)
       options[:pool_size].times.map do |index|
-        name = "#{stream_name}:#{group_name}:consumer:#{index}"
+        name = "consumer_#{index}"
 
         consumer = Ledger::Consumer.new(name, redis: @redis, ledger: @ledger, options: options)
         consumer.add_callback(:on_error, self, :handle_exception)
@@ -149,7 +154,7 @@ module RedisIPC
 
     def create_dispatchers(options)
       options[:pool_size].times.map do |index|
-        name = "#{stream_name}:#{group_name}:dispatcher:#{index}"
+        name = "dispatcher_#{index}"
 
         dispatcher = Dispatcher.new(name, redis: @redis, options: options)
         dispatcher.add_callback(:on_error, self, :handle_exception)

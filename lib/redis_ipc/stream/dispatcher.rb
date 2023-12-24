@@ -29,13 +29,17 @@ module RedisIPC
       #
       def check_for_entries
         entry = read_from_stream
-        return if entry.nil? || group_name != entry.destination_group
+        return if invalid?(entry)
+
+        log("Processing entry:\n#{entry}")
 
         available_consumer = find_load_balanced_consumer
         if available_consumer.nil?
           reject!(entry, reason: "DISPATCH_FAILURE #{group_name}:#{name} failed to find an available consumer")
           return
         end
+
+        log("Dispatched to #{available_consumer}: #{entry.id}")
 
         @redis.claim_entry(available_consumer, entry)
       end

@@ -34,11 +34,13 @@ module RedisIPC
 
         @redis.create_consumer(name)
         @options = DEFAULTS.merge(options).freeze
+        @logger = @redis.logger
 
         # This is the workhorse for the consumer
-        @task = Concurrent::TimerTask.new(execution_interval: @options[:execution_interval], freeze_on_deref: true) do
-          check_for_entries
-        end
+        @task = Concurrent::TimerTask.new(
+          execution_interval: @options[:execution_interval],
+          freeze_on_deref: true
+        ) { check_for_entries }
       end
 
       #
@@ -130,16 +132,28 @@ module RedisIPC
       #
       def check_for_entries
         entry = read_from_stream
+        return if invalid?(entry)
+
+        log("Processing entry:\n#{entry}")
+        entry
       ensure
         acknowledge_and_remove(entry) if entry
       end
 
       private
 
+      def log(content)
+        @logger&.debug("<#{stream_name}:#{group_name}:#{name}> #{content}")
+      end
+
       def check_for_valid_configuration!
         raise ArgumentError, "was created without a name" if name.blank?
         raise ArgumentError, "#{name} was created without a stream name" if stream_name.blank?
         raise ArgumentError, "#{name} was created without a group name" if group_name.blank?
+      end
+
+      def invalid?(entry)
+        entry.nil? || entry.destination_group != group_name
       end
 
       def reject!(entry, reason:)

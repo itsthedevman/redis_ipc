@@ -21,7 +21,11 @@ module RedisIPC
       # @return [Entry]
       #
       def self.from_redis(redis_id, data)
+        return if data.blank?
+
         new(redis_id: redis_id, **data.symbolize_keys)
+      rescue
+        nil
       end
 
       #
