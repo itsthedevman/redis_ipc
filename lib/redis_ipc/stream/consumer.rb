@@ -12,7 +12,7 @@ module RedisIPC
         execution_interval: 0.01
       }.freeze
 
-      attr_reader :name
+      attr_reader :name, :redis
 
       delegate :stream_name, :group_name, to: :@redis
       delegate :add_observer, :delete_observer, :count_observers, to: :@task
@@ -28,11 +28,11 @@ module RedisIPC
       #
       def initialize(name, redis:, options: {})
         @name = name.freeze
+        raise ArgumentError, "Consumer was created without a name" if @name.blank?
+
         @redis = redis
 
-        check_for_valid_configuration!
-
-        @redis.create_consumer(name)
+        @redis.create_consumer(self)
         @options = DEFAULTS.merge(options).freeze
         @logger = @redis.logger
 
@@ -100,7 +100,8 @@ module RedisIPC
         return if listening?
 
         @task.execute
-        change_availability
+        @redis.make_consumer_available(self)
+        log("Listening for entries")
 
         @task
       end
@@ -110,8 +111,8 @@ module RedisIPC
       #
       def stop_listening
         @task.shutdown
+        @redis.make_consumer_unavailable(self)
 
-        change_availability
         true
       end
 
@@ -132,12 +133,12 @@ module RedisIPC
       #
       def check_for_entries
         entry = read_from_stream
-        return if invalid?(entry)
+        return if invalid_entry?(entry)
 
         log("Processing entry:\n#{entry}")
         entry
       ensure
-        acknowledge_and_remove(entry) if entry
+        acknowledge_and_remove(entry)
       end
 
       private
@@ -146,35 +147,31 @@ module RedisIPC
         @logger&.debug("<#{stream_name}:#{group_name}:#{name}> #{content}")
       end
 
-      def check_for_valid_configuration!
-        raise ArgumentError, "was created without a name" if name.blank?
-        raise ArgumentError, "#{name} was created without a stream name" if stream_name.blank?
-        raise ArgumentError, "#{name} was created without a group name" if group_name.blank?
+      def read_from_stream
+        @redis.next_pending_entry(self)
       end
 
-      def invalid?(entry)
+      def invalid_entry?(entry)
         entry.nil? || entry.destination_group != group_name
       end
 
-      def reject!(entry, reason:)
-        @redis.add_to_stream(entry.rejected(content: reason))
-        nil
+      def acknowledge_entry(entry)
+        return if entry.nil?
+
+        @redis.acknowledge_entry(entry)
       end
 
-      def change_availability
-        if listening?
-          @redis.make_consumer_available(name)
-        else
-          @redis.make_consumer_unavailable(name)
-        end
-      end
+      def remove_entry(entry)
+        return if entry.nil?
 
-      def read_from_stream
-        @redis.next_pending_entry(name)
+        @redis.remove_entry(entry)
       end
 
       def acknowledge_and_remove(entry)
-        @redis.acknowledge_and_remove(entry.redis_id)
+        return if entry.nil?
+
+        @redis.acknowledge_entry(entry)
+        @redis.remove_entry(entry)
       end
     end
   end

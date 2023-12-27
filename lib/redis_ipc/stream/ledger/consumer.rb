@@ -16,7 +16,7 @@ module RedisIPC
 
         def check_for_entries
           entry = read_from_stream
-          return if invalid?(entry)
+          return if invalid_entry?(entry)
 
           ledger_entry = @ledger[entry]
           is_a_request = ledger_entry.nil? && entry.status == "pending"
@@ -40,7 +40,7 @@ module RedisIPC
           # `Consumer#add_observer` will need to handle the `nil` "entry" that can be passed through
           nil
         ensure
-          acknowledge_and_remove(entry) if entry
+          acknowledge_and_remove(entry)
         end
 
         private

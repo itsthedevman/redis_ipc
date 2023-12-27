@@ -85,16 +85,7 @@ module RedisIPC
     def send(content:, to:)
       check_for_ledger!
 
-      # Using a Promise because of the functionality it provides which simplifies this code
-      promise = Concurrent::Promise.execute { track_and_send(content, to) }
-
-      # Wait for us to get an entry back, or timeout
-      promise.wait
-
-      # If it was rejected for any reason, raise it so the caller can handle it
-      raise promise.reason if promise.rejected?
-
-      promise.value
+      track_and_send(content, to)
     end
 
     def fulfill(entry:, content:)

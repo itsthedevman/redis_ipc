@@ -16,8 +16,14 @@ RSpec.shared_context("stream") do
     RedisIPC::Stream::Entry.new(
       source_group: group_name,
       destination_group: "other_example_group",
-      content: "Hello"
+      content: Faker::String.random
     )
+  end
+
+  before do
+    # Tracking which groups are created to avoid cleaning up data
+    @groups = Concurrent::Map.new
+    @groups[redis_commands.group_name] = redis_commands
   end
 
   after do
@@ -32,28 +38,26 @@ RSpec.shared_context("stream") do
     to: :redis_commands
 
   def create_consumer(name = nil, group: nil, consumer_class: RedisIPC::Stream::Consumer, **)
-    # stream and group for a consumer come from the redis connection
-    redis =
-      if group
-        RedisIPC::Stream::Commands.new(stream_name, group, logger: logger)
-      else
-        redis_commands
-      end
+    group ||= group_name
+    name ||= "#{consumer_class.name.demodulize.downcase}_#{SecureRandom.uuid.delete("-")[0..5]}"
 
-    name ||= "#{redis.stream_name}:#{redis.group_name}-#{consumer_class.name.demodulize.downcase}:#{SecureRandom.uuid.delete("-")[0..5]}"
-
+    redis = @groups[group] ||= RedisIPC::Stream::Commands.new(stream_name, group, logger: logger)
     consumer_class.new(name, redis: redis, **)
+  end
+
+  def create_dispatcher(name = nil, group: nil, **)
+    create_consumer(name, group: group, consumer_class: RedisIPC::Stream::Dispatcher, **)
   end
 
   def add_to_stream(entry = example_entry, redis: redis_commands)
     redis.add_to_stream(entry)
   end
 
-  def consumer_info_for(consumer_name)
-    consumer_info[consumer_name]
+  def consumer_info_for(consumer)
+    consumer_info[consumer.name]
   end
 
-  def send_and_delegate_to_consumer(consumer, dispatcher = nil, content:)
+  def send_to_consumer(consumer, content:)
     entry = RedisIPC::Stream::Entry.new(
       content: content,
       source_group: group_name,
@@ -61,9 +65,6 @@ RSpec.shared_context("stream") do
     )
 
     add_to_stream(entry)
-    entry = redis_commands.next_unread_entry(dispatcher&.name || "auto_dispatcher")
-    claim_entry(consumer.name, entry)
-
-    entry
+    next_unread_entry(consumer)
   end
 end

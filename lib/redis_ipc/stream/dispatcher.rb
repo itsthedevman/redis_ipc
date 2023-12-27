@@ -16,8 +16,13 @@ module RedisIPC
 
       def initialize(name, **)
         super(name, options: DEFAULTS, **)
+      end
 
+      def listen
         check_for_consumers!
+        log("Listening for entries")
+
+        super
       end
 
       #
@@ -29,25 +34,30 @@ module RedisIPC
       #
       def check_for_entries
         entry = read_from_stream
-        return if invalid?(entry)
 
-        log("Processing entry:\n#{entry}")
-
-        available_consumer = find_load_balanced_consumer
-        if available_consumer.nil?
-          reject!(entry, reason: "DISPATCH_FAILURE #{group_name}:#{name} failed to find an available consumer")
+        # When the dispatcher reads an entry from the stream, it is added to its PEL. Acknowledge to remove it.
+        # Usually, the entry is also deleted but all dispatchers receive the same entry and deleting it causes it
+        # to not be passed to the next dispatcher
+        if invalid_entry?(entry)
+          acknowledge_entry(entry)
           return
         end
 
-        log("Dispatched to #{available_consumer}: #{entry.id}")
+        log("Processing entry:\n#{entry}")
 
-        @redis.claim_entry(available_consumer, entry)
+        consumer = find_load_balanced_consumer
+        if consumer.nil?
+          # TODO: Change this to raise so it bubbles up to the stream - consider what to do with the entry.
+          reject!(entry, reason: "DISPATCH_FAILURE #{group_name}:#{name} failed to find a consumer")
+          return
+        end
+
+        log("Dispatched to #{consumer.name}: #{entry.id}")
+
+        @redis.claim_entry(consumer, entry)
       end
 
       private
-
-      # noop. Dispatchers do not need to be made "available"
-      def change_availability = nil
 
       def read_from_stream
         # Along with dispatching the normal unread entries, Dispatchers also implement two failsafe to ensure
@@ -58,62 +68,48 @@ module RedisIPC
         # Pending entries: Any entry claimed by the Dispatcher, but hasn't been dispatched yet.
         #
         # Reclaimed and pending entries should be a rarity, but its better to handle them than to let them sit
-        @redis.next_reclaimed_entry(name) || @redis.next_unread_entry(name) || @redis.next_pending_entry(name)
+        @redis.next_reclaimed_entry(self) || @redis.next_unread_entry(self) || @redis.next_pending_entry(self)
       end
 
-      def available_consumer_names
-        @redis.available_consumer_names
+      def consumer_info
+        @redis.consumer_info(group_name, filter_for: @redis.available_consumer_names)
       end
 
       def check_for_consumers!
-        return if available_consumer_names.size > 0
+        return if consumer_info.size > 0
 
         raise ConfigurationError, "No consumers available for #{stream_name}:#{group_name}. Please make sure at least one Consumer is listening before creating any Dispatchers"
       end
 
       def find_load_balanced_consumer
-        consumer_names = available_consumer_names
-        busy_consumers = @redis.consumer_info(group_name, filter_for: consumer_names)
-
-        available_consumers = consumer_names.sort do |a, b|
-          load_balance_consumer(a, b, busy_consumers: busy_consumers)
-        end
-
-        available_consumers.first
+        consumer_info.values.min { |a, b| load_balance_consumer(a, b) }
       end
 
       MOVE_AHEAD = -1
+      private_constant :MOVE_AHEAD
+
       MOVE_BEHIND = 1
+      private_constant :MOVE_BEHIND
 
-      def load_balance_consumer(consumer_a_name, consumer_b_name, busy_consumers:)
-        consumer_a_info = busy_consumers[consumer_a_name]
-        consumer_b_info = busy_consumers[consumer_b_name]
-
-        # Self explanatory
-        consumer_a_is_free = consumer_a_info.nil?
-        consumer_b_is_free = consumer_b_info.nil?
-
-        return MOVE_AHEAD if consumer_a_is_free
-        return MOVE_BEHIND if consumer_b_is_free
-
-        # Sorts if either don't have pending entries
+      def load_balance_consumer(consumer_a, consumer_b)
+        # Sorts if either consumer don't have pending entries
         # Only continues if both consumers have the same number of entries, but greater than 0
-        consumer_a_pending = consumer_a_info&.fetch("pending", 0)
-        consumer_b_pending = consumer_b_info&.fetch("pending", 0)
+        consumer_a_pending = consumer_a["pending"] || 0
+        consumer_b_pending = consumer_b["pending"] || 0
 
         return MOVE_AHEAD if consumer_a_pending.zero?
         return MOVE_BEHIND if consumer_b_pending.zero?
         return MOVE_AHEAD if consumer_a_pending < consumer_b_pending
         return MOVE_BEHIND if consumer_b_pending < consumer_a_pending
 
-        # Sorts if either are inactive
-        consumer_a_inactive_time = consumer_a_info&.fetch("inactive", 0)
+        # Sorts if either consumer are inactive
+        consumer_a_inactive_time = consumer_a["inactive"] || 0
         consumer_a_is_inactive = consumer_a_inactive_time.zero?
-        consumer_a_idle_time = consumer_a_info&.fetch("idle", 0)
+        consumer_a_idle_time = consumer_a["idle"] || 0
 
-        consumer_b_inactive_time = consumer_b_info&.fetch("inactive", 0)
+        consumer_b_inactive_time = consumer_b["inactive"] || 0
         consumer_b_is_inactive = consumer_b_inactive_time.zero?
-        consumer_b_idle_time = consumer_b_info&.fetch("idle", 0)
+        consumer_b_idle_time = consumer_b["idle"] || 0
 
         return MOVE_AHEAD if consumer_a_is_inactive && consumer_a_idle_time > consumer_b_idle_time
         return MOVE_BEHIND if consumer_b_is_inactive && consumer_b_idle_time > consumer_a_idle_time
