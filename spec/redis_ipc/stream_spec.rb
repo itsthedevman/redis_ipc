@@ -117,8 +117,8 @@ describe RedisIPC::Stream do
         puts(message: exception.message, backtrace: exception.backtrace)
       end
 
-      other_stream.connect(logger: logger)
-      stream.connect(logger: logger)
+      other_stream.connect(**redis_commands_opts)
+      stream.connect(**redis_commands_opts)
     end
 
     after { other_stream.disconnect }

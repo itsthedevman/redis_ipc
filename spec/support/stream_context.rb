@@ -5,8 +5,9 @@ RSpec.shared_context("stream") do
   let!(:group_name) { "example_group" }
   let!(:logger) { Logger.new($stdout) }
 
+  let!(:redis_commands_opts) { {} } # { {logger: logger} } # Use if logging is needed
   let!(:redis_commands) do
-    RedisIPC::Stream::Commands.new(stream_name, group_name, logger: logger)
+    RedisIPC::Stream::Commands.new(stream_name, group_name, **redis_commands_opts)
   end
 
   let(:redis_pool) { redis_commands.redis_pool }
@@ -41,7 +42,7 @@ RSpec.shared_context("stream") do
     group ||= group_name
     name ||= "#{consumer_class.name.demodulize.downcase}_#{SecureRandom.uuid.delete("-")[0..5]}"
 
-    redis = @groups[group] ||= RedisIPC::Stream::Commands.new(stream_name, group, logger: logger)
+    redis = @groups[group] ||= RedisIPC::Stream::Commands.new(stream_name, group, **redis_commands_opts)
     consumer_class.new(name, redis: redis, **)
   end
 
