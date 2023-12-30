@@ -177,14 +177,14 @@ module RedisIPC
       def remove_entry(entry)
         return if entry.nil?
 
-        @redis.remove_entry(entry)
+        @redis.delete_entry(entry)
       end
 
       def acknowledge_and_remove(entry)
         return if entry.nil?
 
         @redis.acknowledge_entry(entry)
-        @redis.remove_entry(entry)
+        @redis.delete_entry(entry)
       end
     end
   end
