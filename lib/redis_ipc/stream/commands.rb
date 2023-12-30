@@ -40,9 +40,6 @@ module RedisIPC
         @logger = logger
 
         log("Initialized with max_pool_size of #{max_pool_size}")
-
-        destroy_group
-        create_group
       end
 
       #
@@ -327,11 +324,14 @@ module RedisIPC
       def make_consumer_available(consumer)
         return if consumer_available?(consumer)
 
-        log("Consumer #{consumer.name} is now available")
-
         redis_pool.with do |redis|
           redis.lpush(available_redis_consumers_key, consumer.name)
         end
+
+        log("Consumer #{consumer.name} is now available")
+
+        log("Available consumers: #{available_consumer_names.size}")
+        true
       end
 
       #
@@ -342,12 +342,14 @@ module RedisIPC
       def make_consumer_unavailable(consumer)
         return unless consumer_available?(consumer)
 
-        log("Consumer #{consumer.name} is no longer available")
-
         redis_pool.with do |redis|
           # 0 is remove all
           redis.lrem(available_redis_consumers_key, 0, consumer.name)
         end
+
+        log("Consumer #{consumer.name} is no longer available")
+
+        true
       end
 
       private

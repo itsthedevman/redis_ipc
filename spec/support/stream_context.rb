@@ -3,9 +3,9 @@
 RSpec.shared_context("stream") do
   let!(:stream_name) { "example_stream" }
   let!(:group_name) { "example_group" }
-  let!(:logger) { Logger.new($stdout) }
+  let(:logger) { Logger.new($stdout) }
 
-  let!(:redis_commands_opts) { {} } # { {logger: logger} } # Use if logging is needed
+  let!(:redis_commands_opts) { {logger: logger} } # Use if logging is needed
   let!(:redis_commands) do
     RedisIPC::Stream::Commands.new(stream_name, group_name, **redis_commands_opts)
   end
@@ -22,12 +22,19 @@ RSpec.shared_context("stream") do
   end
 
   before do
+    redis_commands.destroy_group
+    redis_commands.create_group
+
+    # Do not delete the stream/group here as that this can run AFTER consumers are created
+    # Which causes issues when they go to check for entries
+
     # Tracking which groups are created to avoid cleaning up data
     @groups = Concurrent::Map.new
     @groups[redis_commands.group_name] = redis_commands
   end
 
   after do
+    redis_commands.destroy_group
     redis_commands.delete_stream
 
     # Forcing the checkin will silence the error
@@ -40,9 +47,11 @@ RSpec.shared_context("stream") do
 
   def create_consumer(name = nil, group: nil, consumer_class: RedisIPC::Stream::Consumer, **)
     group ||= group_name
-    name ||= "#{consumer_class.name.demodulize.downcase}_#{SecureRandom.uuid.delete("-")[0..5]}"
+    name ||= "#{group}_#{consumer_class.name.demodulize.downcase}_#{Time.now.to_f}"
 
     redis = @groups[group] ||= RedisIPC::Stream::Commands.new(stream_name, group, **redis_commands_opts)
+    redis.create_group # Since this command can create new groups, this needs to be here
+
     consumer_class.new(name, redis: redis, **)
   end
 

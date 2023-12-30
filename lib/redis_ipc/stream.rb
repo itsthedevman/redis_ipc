@@ -57,6 +57,9 @@ module RedisIPC
         **options.slice(:logger, :reset)
       )
 
+      @redis.destroy_group
+      @redis.create_group
+
       @ledger = Ledger.new(options[:ledger])
       @consumers = create_consumers(options[:consumer])
       @dispatchers = create_dispatchers(options[:dispatcher])
@@ -131,6 +134,8 @@ module RedisIPC
     end
 
     def create_consumers(options)
+      @redis.clear_available_consumers
+
       options[:pool_size].times.map do |index|
         name = "consumer_#{index}"
 
