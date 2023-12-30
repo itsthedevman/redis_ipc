@@ -100,7 +100,7 @@ module RedisIPC
         return if listening?
 
         @task.execute
-        @redis.make_consumer_available(self)
+        change_availability
         log("Listening for entries")
 
         @task
@@ -111,7 +111,7 @@ module RedisIPC
       #
       def stop_listening
         @task.shutdown
-        @redis.make_consumer_unavailable(self)
+        change_availability
 
         true
       end
@@ -145,6 +145,19 @@ module RedisIPC
 
       def log(content)
         @logger&.debug("<#{stream_name}:#{group_name}:#{name}> #{content}")
+      end
+
+      #
+      # This addresses an issue with dispatching. Since the dispatcher is a consumer, Redis will include it in the
+      # results from redis.consumer_info. The whole purpose of this is to ensure a dispatcher does not have entries
+      # dispatched to it.
+      #
+      def change_availability
+        if listening?
+          @redis.make_consumer_available(self)
+        else
+          @redis.make_consumer_unavailable(self)
+        end
       end
 
       def read_from_stream

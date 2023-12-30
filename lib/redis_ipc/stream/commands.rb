@@ -11,6 +11,12 @@ module RedisIPC
       READ_FROM_PEL = "0"
       READ_FROM_STREAM = ">"
 
+      CONSUMER_PROXY = Data.define(:name, :pending, :idle, :inactive) do
+        def initialize(name:, pending: 0, idle: 0, inactive: 0)
+          super(name: name, pending: pending, idle: idle, inactive: inactive)
+        end
+      end
+
       attr_reader :stream_name, :group_name, :redis_pool, :logger
 
       #
@@ -264,16 +270,18 @@ module RedisIPC
       #
       # @param for_group_name [String] The group the consumers belong to
       #
-      def consumer_info(for_group_name = group_name, filter_for: [])
+      def consumer_info(for_group_name = group_name, filter_for: nil)
         result = redis_pool.with do |redis|
           redis.xinfo(:consumers, stream_name, for_group_name)
         end
 
-        if filter_for.present?
-          result.select! { |consumer| filter_for.include?(consumer["name"]) }
+        result = result.map { |r| CONSUMER_PROXY.new(**r.symbolize_keys) }
+
+        if filter_for.is_a?(Array)
+          result.select! { |consumer| filter_for.include?(consumer.name) }
         end
 
-        result.index_by { |consumer| consumer["name"] }
+        result.index_by(&:name)
       end
 
       #

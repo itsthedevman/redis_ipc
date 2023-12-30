@@ -60,7 +60,7 @@ describe RedisIPC::Stream::Commands do
         expect { redis_commands.delete_entry(entry) }.not_to raise_error
         expect(entries_size).to eq(0)
 
-        expect(consumer_info_for(dispatcher)).to include("pending" => 1)
+        expect(consumer_info_for(dispatcher)&.pending).to eq(1)
       end
     end
   end
@@ -86,7 +86,7 @@ describe RedisIPC::Stream::Commands do
         redis_commands.acknowledge_entry(entry)
 
         expect(entries_size).to eq(1) # Acknowledge does not remove the entry from the stream
-        expect(consumer_info_for(dispatcher)).to include("pending" => 0)
+        expect(consumer_info_for(dispatcher)&.pending).to eq(0)
       end
     end
   end
@@ -290,19 +290,15 @@ describe RedisIPC::Stream::Commands do
       claim_entry(consumer, entry) # consumer_1 takes ownership
 
       # Check make sure things are correct
-      expect(consumer_info).to include(
-        dispatcher.name => hash_including("pending" => 0),
-        consumer.name => hash_including("pending" => 1)
-      )
+      expect(consumer_info_for(dispatcher)&.pending).to eq(0)
+      expect(consumer_info_for(consumer)&.pending).to eq(1)
 
       expect(next_reclaimed_entry).to eq(entry) # reclaimer takes ownership
 
       # Double check!
-      expect(consumer_info).to include(
-        dispatcher.name => hash_including("pending" => 0),
-        consumer.name => hash_including("pending" => 0),
-        reclaimer.name => hash_including("pending" => 1)
-      )
+      expect(consumer_info_for(dispatcher)&.pending).to eq(0)
+      expect(consumer_info_for(consumer)&.pending).to eq(0)
+      expect(consumer_info_for(reclaimer)&.pending).to eq(1)
     end
   end
 
@@ -358,10 +354,10 @@ describe RedisIPC::Stream::Commands do
     before { next_unread_entry(dispatcher) }
 
     it "assigns the entry to the consumer" do
-      expect(consumer_info_for(consumer)).to include("pending" => 0)
+      expect(consumer_info_for(consumer)&.pending).to eq(0)
 
       expect(claimed_entry).to eq(entry)
-      expect(consumer_info_for(consumer)).to include("pending" => 1)
+      expect(consumer_info_for(consumer)&.pending).to eq(1)
     end
   end
 

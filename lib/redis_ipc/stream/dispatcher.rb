@@ -59,6 +59,9 @@ module RedisIPC
 
       private
 
+      # Noop. Dispatchers should not appear in the available consumers list
+      def change_availability = nil
+
       def read_from_stream
         # Along with dispatching the normal unread entries, Dispatchers also implement two failsafe to ensure
         # all entries are processed.
@@ -72,7 +75,7 @@ module RedisIPC
       end
 
       def consumer_info
-        @redis.consumer_info(group_name, filter_for: @redis.available_consumer_names)
+        @redis.consumer_info(filter_for: @redis.available_consumer_names)
       end
 
       def check_for_consumers!
@@ -94,8 +97,8 @@ module RedisIPC
       def load_balance_consumer(consumer_a, consumer_b)
         # Sorts if either consumer don't have pending entries
         # Only continues if both consumers have the same number of entries, but greater than 0
-        consumer_a_pending = consumer_a["pending"] || 0
-        consumer_b_pending = consumer_b["pending"] || 0
+        consumer_a_pending = consumer_a.pending
+        consumer_b_pending = consumer_b.pending
 
         return MOVE_AHEAD if consumer_a_pending.zero?
         return MOVE_BEHIND if consumer_b_pending.zero?
@@ -103,13 +106,11 @@ module RedisIPC
         return MOVE_BEHIND if consumer_b_pending < consumer_a_pending
 
         # Sorts if either consumer are inactive
-        consumer_a_inactive_time = consumer_a["inactive"] || 0
-        consumer_a_is_inactive = consumer_a_inactive_time.zero?
-        consumer_a_idle_time = consumer_a["idle"] || 0
+        consumer_a_is_inactive = consumer_a.inactive.zero?
+        consumer_a_idle_time = consumer_a.idle
 
-        consumer_b_inactive_time = consumer_b["inactive"] || 0
-        consumer_b_is_inactive = consumer_b_inactive_time.zero?
-        consumer_b_idle_time = consumer_b["idle"] || 0
+        consumer_b_is_inactive = consumer_b.inactive.zero?
+        consumer_b_idle_time = consumer_b.idle
 
         return MOVE_AHEAD if consumer_a_is_inactive && consumer_a_idle_time > consumer_b_idle_time
         return MOVE_BEHIND if consumer_b_is_inactive && consumer_b_idle_time > consumer_a_idle_time

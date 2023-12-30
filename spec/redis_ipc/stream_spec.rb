@@ -108,7 +108,7 @@ describe RedisIPC::Stream do
   end
 
   describe "Sending/Receiving" do
-    subject!(:other_stream) { described_class.new(stream_name, "other_group") }
+    subject(:other_stream) { described_class.new(stream_name, "other_group") }
 
     before do
       other_stream.on_message do |entry|

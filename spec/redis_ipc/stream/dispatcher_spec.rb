@@ -3,12 +3,12 @@
 describe RedisIPC::Stream::Dispatcher do
   include_context "stream"
 
-  subject!(:dispatcher) { create_dispatcher }
+  let(:dispatcher) { create_dispatcher }
 
   describe "#check_for_entries" do
     let!(:consumer) do
       consumer = create_consumer
-      consumer.redis.create_consumer(consumer) # Needed for dispatching
+      consumer.redis.make_consumer_available(consumer)
       consumer
     end
 
@@ -19,21 +19,21 @@ describe RedisIPC::Stream::Dispatcher do
 
       it "assigns it to a consumer" do
         expect(entries_size).to eq(1)
-        expect(consumer_info_for(dispatcher)).to include("pending" => 0)
-        expect(consumer_info_for(consumer)).to include("pending" => 0)
+        expect(consumer_info_for(dispatcher)&.pending).to eq(0)
+        expect(consumer_info_for(consumer)&.pending).to eq(0)
 
         dispatcher.check_for_entries
 
         expect(entries_size).to eq(1)
-        expect(consumer_info_for(dispatcher)).to include("pending" => 0)
-        expect(consumer_info_for(consumer)).to include("pending" => 1)
+        expect(consumer_info_for(dispatcher)&.pending).to eq(0)
+        expect(consumer_info_for(consumer)&.pending).to eq(1)
       end
     end
 
     context "when the entry is not for the group" do
       let!(:other_consumer) do
         consumer = create_consumer(group: "other_group")
-        consumer.redis.create_consumer(consumer) # Needed for dispatching
+        consumer.redis.make_consumer_available(consumer)
         consumer
       end
 
@@ -45,14 +45,14 @@ describe RedisIPC::Stream::Dispatcher do
 
       it "ignores it" do
         expect(entries_size).to eq(1)
-        expect(consumer_info_for(dispatcher)).to include("pending" => 0)
-        expect(consumer_info_for(consumer)).to include("pending" => 0)
+        expect(consumer_info_for(dispatcher)&.pending).to eq(0)
+        expect(consumer_info_for(consumer)&.pending).to eq(0)
 
         dispatcher.check_for_entries
 
         expect(entries_size).to eq(1)
-        expect(consumer_info_for(dispatcher)).to include("pending" => 0)
-        expect(consumer_info_for(consumer)).to include("pending" => 0)
+        expect(consumer_info_for(dispatcher)&.pending).to eq(0)
+        expect(consumer_info_for(consumer)&.pending).to eq(0)
       end
     end
   end
@@ -61,20 +61,19 @@ describe RedisIPC::Stream::Dispatcher do
     let!(:consumers) do
       5.times.map do |i|
         consumer = create_consumer
-        consumer.redis.create_consumer(consumer) # Needed for dispatching
+        consumer.redis.make_consumer_available(consumer)
         consumer
       end
     end
 
-    subject(:balanced_consumer_name) { dispatcher.send(:find_load_balanced_consumer) }
+    subject(:balanced_consumer_name) { dispatcher.send(:find_load_balanced_consumer)&.name }
 
     context "when there are no pending entries" do
-      it "will pick the first consumer created" do
-        binding.pry
-        expect(balanced_consumer_name).not_to be_nil
+      let!(:consumer_names) { consumers.map(&:name) }
 
+      it "will pick the first consumer created" do
         # This is backwards since array.include?
-        expect(consumers.map(&:name)).to include(balanced_consumer_name)
+        expect(consumer_names).to include(balanced_consumer_name)
       end
     end
 
@@ -89,7 +88,7 @@ describe RedisIPC::Stream::Dispatcher do
 
       it "will pick a consumer with no entries" do
         (free_consumer_1, free_consumer_2) = consumers - consumer_sampler
-        expect(balanced_consumer_name).to eq(free_consumer_1.name) || eq(free_consumer_2.name)
+        expect([free_consumer_1.name, free_consumer_2.name]).to include(balanced_consumer_name)
       end
     end
 
@@ -104,9 +103,9 @@ describe RedisIPC::Stream::Dispatcher do
       end
 
       it "will pick a consumer with the least amount of pending entries" do
-        consumer = consumer_info.min_by { |c| c["pending"] }
+        consumer = consumer_info.values.min_by(&:pending)
 
-        expect(balanced_consumer_name).to eq(consumer["name"])
+        expect(balanced_consumer_name).to eq(consumer.name)
       end
     end
 
@@ -121,9 +120,9 @@ describe RedisIPC::Stream::Dispatcher do
 
       it "will pick an active consumer who has idled the longest" do
         # I know all of the consumers have pending entries so I can skip that
-        consumer = consumer_info.min { |a, b| b["idle"] <=> a["idle"] }
+        consumer = consumer_info.values.min { |a, b| b.idle <=> a.idle }
 
-        expect(balanced_consumer_name).to eq(consumer["name"])
+        expect(balanced_consumer_name).to eq(consumer.name)
       end
     end
   end
