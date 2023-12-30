@@ -44,12 +44,10 @@ describe RedisIPC::Stream do
       let(:dispatchers) { stream.instance_variable_get(:@dispatchers) }
 
       it "uses those values" do
-        options = {
+        stream.connect(
           consumer: {pool_size: 3},
           dispatcher: {pool_size: 2}
-        }
-
-        stream.connect(options: options)
+        )
 
         expect(consumers.size).to eq(3)
         expect(dispatchers.size).to eq(2)

@@ -2,7 +2,7 @@
 
 describe RedisIPC::Stream::Entry do
   subject(:entry) do
-    described_class.new(destination_group: "destination_group", content: "content")
+    described_class.new(source_group: "source_group", destination_group: "destination_group", content: "content")
   end
 
   it "is valid" do
@@ -12,13 +12,20 @@ describe RedisIPC::Stream::Entry do
   end
 
   context "when no id is provided" do
-    it "stores nil for the id" do
-      expect(entry.id).to be_nil
+    it "generates an id" do
+      expect(entry.id).not_to be_nil
     end
   end
 
   context "when an id is provided" do
-    subject(:entry) { described_class.new(id: "id", destination_group: "destination_group", content: "content") }
+    subject(:entry) do
+      described_class.new(
+        id: "id",
+        source_group: "source_group",
+        destination_group: "destination_group",
+        content: "content"
+      )
+    end
 
     it "stores the id" do
       expect(entry.id).to eq("id")
@@ -28,19 +35,18 @@ describe RedisIPC::Stream::Entry do
   describe "#to_h" do
     subject(:hash) { entry.to_h }
 
-    context "when no id is provided" do
-      it "stores nil for the id" do
-        expect(hash).not_to have_key(:id)
-      end
+    subject(:entry) do
+      described_class.new(
+        id: "id",
+        source_group: "source_group",
+        destination_group: "destination_group",
+        content: "content"
+      )
     end
 
-    context "when an id is provided" do
-      subject(:entry) { described_class.new(id: "id", destination_group: "destination_group", content: "content") }
-
-      it "stores the id" do
-        expect(hash).to have_key(:id)
-        expect(hash[:id]).to eq("id")
-      end
+    it "stores the id" do
+      expect(hash).to have_key(:id)
+      expect(hash[:id]).to eq("id")
     end
   end
 end

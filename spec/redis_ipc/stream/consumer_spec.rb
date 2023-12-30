@@ -22,14 +22,12 @@ describe RedisIPC::Stream::Consumer do
       it "creates a Entry instance and broadcasts to all observers without acknowledging it" do
         content = Faker::String.random
 
-        response = send_and_delegate_to_consumer(consumer, content: content)
+        response = send_to_consumer(consumer, content: content)
 
         expect(response).to be_kind_of(RedisIPC::Stream::Entry)
         expect(response.content).to eq(content)
 
-        consumer_info = consumer_info_for(consumer.name)
-        expect(consumer_info).not_to be_nil
-        expect(consumer_info["pending"]).to eq(1)
+        expect(consumer_info_for(consumer)&.pending).to eq(1)
       end
     end
   end
