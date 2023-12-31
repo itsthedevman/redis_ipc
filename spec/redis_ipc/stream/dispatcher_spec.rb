@@ -95,7 +95,7 @@ describe RedisIPC::Stream::Dispatcher do
     context "when all consumers have entries, but some have less than others" do
       before do
         consumers.shuffle.each_with_index do |consumer, index|
-          # Using the index to ensure a the proper ordering to check against
+          # Using the index to ensure proper ordering
           (index + 1).times do
             send_to_consumer(consumer, content: Faker::String.random)
           end
@@ -103,7 +103,7 @@ describe RedisIPC::Stream::Dispatcher do
       end
 
       it "will pick a consumer with the least amount of pending entries" do
-        consumer = consumer_info.values.min_by(&:pending)
+        consumer = consumer_info(filter_for: consumers.map(&:name)).values.min_by(&:pending)
 
         expect(balanced_consumer_name).to eq(consumer.name)
       end
@@ -112,7 +112,7 @@ describe RedisIPC::Stream::Dispatcher do
     context "when all consumers have equal pending entries" do
       before do
         consumers.shuffle.each do |consumer|
-          sleep(rand / 1000) # We're working with the milliseconds, this doesn't need to delay very long
+          sleep(rand / 1000) # We're working in milliseconds, this doesn't need to delay for very long
 
           send_to_consumer(consumer, content: Faker::String.random)
         end
