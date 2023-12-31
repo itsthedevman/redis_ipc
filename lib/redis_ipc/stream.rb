@@ -165,7 +165,7 @@ module RedisIPC
 
       # The entry must be added to the ledger before adding to the stream as that, in testing, the consumers can
       # get ahold of the entry before the ledger has everything ready.
-      mailbox = @ledger.add(entry)
+      mailbox = @ledger.store_entry(entry)
       @redis.add_to_stream(entry)
 
       # The mailbox is a Concurrent::MVar which allows us to wait for data to be added (or timeout)
@@ -178,7 +178,7 @@ module RedisIPC
         result
       end
     ensure
-      @ledger.delete(entry)
+      @ledger.delete_entry(entry)
     end
   end
 end

@@ -18,7 +18,7 @@ module RedisIPC
           entry = read_from_stream
           return if invalid_entry?(entry)
 
-          ledger_entry = @ledger[entry]
+          ledger_entry = @ledger.fetch_entry(entry)
           is_a_request = ledger_entry.nil? && entry.status == "pending"
           is_a_response = !ledger_entry.nil? && ["fulfilled", "rejected"].include?(entry.status)
 
