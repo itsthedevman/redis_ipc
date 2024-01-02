@@ -45,37 +45,9 @@ end
 
 # Until this point, this endpoint was not connected to the stream.
 # Calling #connect will allow us to send and receive entries on the stream
-stream.connect
-
-# Now we can send data
-# This will block until "another_group" picks up the entry, or until the timeout is reached, in which this will raise an exception
-stream.send_to_group(content: "Hello!", to: "another_group")
-```
-
-## Realistic example
-
-Run this code in one Ruby process:
-
-```ruby
-require "redis_ipc"
-
-# Setup the basic stream
-child_stream = RedisIPC::Stream.new("electric_household", "child")
-child_stream.on_error do |exception|
-  puts exception # This method would log the exception and do other business logic, if it existed
-end
-
-# When an entry comes in, have a 75% chance of fulfilling the request, and a 25% chance of being a baby
-child_stream.on_request do |entry|
-  if rand > 0.25
-    fulfill_request(entry, content: "Yes, creators")
-  else
-    reject_request(entry, content: "No! <Tantrum initiated>")
-  end
-end
-
+#
 # All of the following options are pre-configured so they do not have to be provided
-child_stream.connect(
+stream.connect(
   # Redis connection options. Host, port, url, etc.
   redis_options: {},
 
@@ -123,16 +95,48 @@ child_stream.connect(
     execution_interval: 0.01
   }
 )
+
+# Now we can send data
+# This will block until "another_group" picks up the entry, or until the timeout is reached, in which this will raise an exception
+stream.send_to_group(content: "Hello!", to: "another_group")
 ```
 
-And then run this code in another Ruby process, separate from the one above. _Although, it can work in the same process_
+## Realistic example
+
+Run the following code in a Ruby IRB process.
+_If running this code from a script, make sure the script does not exit unless told to._
+
+```ruby
+require "redis_ipc"
+
+# Setup the basic stream
+child_stream = RedisIPC::Stream.new("electric_household", "child")
+child_stream.on_error do |exception|
+  puts exception
+end
+
+# When an entry comes in, have a 75% chance of fulfilling the request, and a 25% chance of being a baby
+child_stream.on_request do |entry|
+  if rand > 0.25
+    fulfill_request(entry, content: "Yes, creators")
+  else
+    reject_request(entry, content: "No! <Tantrum initiated>")
+  end
+end
+
+# Connect to the stream
+child_stream.connect
+```
+
+And then run this code in another Ruby IRB process, separate from the one above.
+_Although, it can work in the same process._
 
 ```ruby
 require "redis_ipc"
 
 parent_stream = RedisIPC::Stream.new("electric_household", "parent")
 parent_stream.on_error do |exception|
-  log_exception(exception) # This method would log the exception and do other business logic, if it existed
+  puts exception
 end
 
 # This parent isn't very nice
