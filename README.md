@@ -54,7 +54,7 @@ stream.send_to_group(content: "Hello!", to: "another_group")
 
 ## Realistic example
 
-Run this code in a Ruby process first and make sure
+Run this code in one Ruby process:
 
 ```ruby
 require "redis_ipc"
@@ -125,7 +125,7 @@ child_stream.connect(
 )
 ```
 
-Run this code in a separate Ruby process
+And then run this code in another Ruby process, separate from the one above. _Although, it can work in the same process_
 
 ```ruby
 require "redis_ipc"
@@ -178,9 +178,9 @@ Contributions are welcome! If you find any issues or have suggestions for improv
 3. Run the tests:
 
    ```bash
-   rake test
+   bundle exec rspec spec
    ```
 
 ## License
 
-The gem is available as open source under the terms of the [MIT License](LICENSE).
+The gem is available as open source under the terms of the [MIT License](https://github.com/itsthedevman/redis_ipc/blob/main/LICENSE).

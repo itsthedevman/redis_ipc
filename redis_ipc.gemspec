@@ -4,11 +4,12 @@ require_relative "lib/redis_ipc/version"
 
 Gem::Specification.new do |spec|
   spec.name = "redis_ipc"
+  spec.licenses = ["MIT"]
   spec.version = RedisIPC::VERSION
   spec.authors = ["Bryan"]
   spec.email = ["bryan@itsthedevman.com"]
 
-  spec.summary = "Redis IPC"
+  spec.summary = "Inter-process communication via Redis Streams"
   spec.required_ruby_version = ">= 3.0.0"
 
   spec.metadata["source_code_uri"] = "https://github.com/itsthedevman/redis_ipc_rb"
