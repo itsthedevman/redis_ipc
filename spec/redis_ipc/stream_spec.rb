@@ -8,7 +8,7 @@ describe RedisIPC::Stream do
   end
 
   before do
-    stream.on_message {}
+    stream.on_request {}
     stream.on_error {}
   end
 
@@ -17,13 +17,13 @@ describe RedisIPC::Stream do
   end
 
   describe "#connect" do
-    context "when #on_message is nil" do
-      before { stream.instance_variable_set(:@on_message, nil) }
+    context "when #on_request is nil" do
+      before { stream.instance_variable_set(:@on_request, nil) }
 
       it "raises an error" do
         expect { stream.connect }.to raise_error(
           RedisIPC::ConfigurationError,
-          "Stream#on_message must be a lambda or proc"
+          "Stream#on_request must be a lambda or proc"
         )
       end
     end
@@ -109,8 +109,8 @@ describe RedisIPC::Stream do
     subject(:other_stream) { described_class.new(stream_name, "other_group") }
 
     before do
-      other_stream.on_message do |entry|
-        other_stream.respond_to(entry: entry, content: "#{entry.content} back")
+      other_stream.on_request do |entry|
+        fulfill_request(entry, content: "#{entry.content} back")
       end
 
       other_stream.on_error do |exception|
@@ -125,7 +125,11 @@ describe RedisIPC::Stream do
 
     context "when an entry is sent" do
       it "receives a response" do
-        expect(stream.send(content: "Hello", to: "other_group")).to eq("Hello back")
+        response = stream.send_to_group(content: "Hello", to: "other_group")
+        expect(response).to be_instance_of(described_class::Entry)
+        expect(response.fulfilled?).to be true
+
+        expect(response.content).to eq("Hello back")
       end
     end
   end

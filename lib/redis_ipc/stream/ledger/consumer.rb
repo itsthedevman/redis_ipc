@@ -60,7 +60,7 @@ module RedisIPC
 
           # ledger_entry#mailbox is type Concurrent::MVar. Currently Stream#track_and_send is waiting for a value
           # to be stored in here. Once this happens, that thread will receive this value and return it to the caller
-          ledger_entry.mailbox.put(entry.content)
+          ledger_entry.mailbox.put(entry)
         end
       end
     end

@@ -330,7 +330,6 @@ module RedisIPC
 
         log("Consumer #{consumer.name} is now available")
 
-        log("Available consumers: #{available_consumer_names.size}")
         true
       end
 

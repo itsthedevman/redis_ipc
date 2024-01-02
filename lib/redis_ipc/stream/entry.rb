@@ -48,6 +48,11 @@ module RedisIPC
         super.except(:redis_id)
       end
 
+      #
+      # Makes a copy of the entry, marks it as fulfilled, and adjusts it so it can be sent back to the sender
+      #
+      # @param content [String] The content to send
+      #
       def fulfilled(content:)
         with(
           content: content,
@@ -57,6 +62,11 @@ module RedisIPC
         )
       end
 
+      #
+      # Makes a copy of the entry, marks it as rejected, and adjusts it so it can be sent back to the sender
+      #
+      # @param content [String] The content to send
+      #
       def rejected(content:)
         with(
           content: content,
@@ -64,6 +74,24 @@ module RedisIPC
           source_group: destination_group,
           destination_group: source_group
         )
+      end
+
+      #
+      # Was this entry fulfilled?
+      #
+      # @return [Boolean]
+      #
+      def fulfilled?
+        status == STATUS_FULFILLED
+      end
+
+      #
+      # Was this entry rejected?
+      #
+      # @return [Boolean]
+      #
+      def rejected?
+        status == STATUS_REJECTED
       end
     end
   end

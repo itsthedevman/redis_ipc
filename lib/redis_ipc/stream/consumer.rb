@@ -60,7 +60,7 @@ module RedisIPC
           if block
             yield(data)
           else
-            observer.public_send(function, data)
+            observer.send(function, data)
           end
         end
 

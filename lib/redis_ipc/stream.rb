@@ -9,12 +9,12 @@ module RedisIPC
       self.stream_name = stream
       self.group_name = group
 
-      @on_message = nil
+      @on_request = nil
       @on_error = nil
     end
 
-    def on_message(&block)
-      @on_message = block
+    def on_request(&block)
+      @on_request = block
     end
 
     def on_error(&block)
@@ -85,46 +85,38 @@ module RedisIPC
       self
     end
 
-    def send(content:, to:)
+    def send_to_group(content:, to:)
       check_for_ledger!
 
       track_and_send(content, to)
     end
 
-    def fulfill(entry:, content:)
+    def fulfill_request(entry, content:)
       check_for_ledger!
       @redis.add_to_stream(entry.fulfilled(content: content))
 
       nil
     end
 
-    alias_method :respond_to, :fulfill
-
-    def reject(entry:, content:)
+    def reject_request(entry, content:)
       check_for_ledger!
       @redis.add_to_stream(entry.rejected(content: content))
 
       nil
     end
 
-    #
-    # @private
-    #
-    def handle_entry(entry)
-      @on_message.call(entry)
-    end
-
-    #
-    # @private
-    #
-    def handle_exception(exception)
-      @on_error.call(exception)
-    end
-
     private
 
+    def handle_entry(entry)
+      instance_exec(entry, &@on_request)
+    end
+
+    def handle_exception(exception)
+      instance_exec(exception, &@on_error)
+    end
+
     def check_for_valid_configuration!
-      raise ConfigurationError, "Stream#on_message must be a lambda or proc" if !@on_message.is_a?(Proc)
+      raise ConfigurationError, "Stream#on_request must be a lambda or proc" if !@on_request.is_a?(Proc)
       raise ConfigurationError, "Stream#on_error must be a lambda or proc" if !@on_error.is_a?(Proc)
       raise ConnectionError, "Stream is already connected" if @ledger
     end
@@ -169,6 +161,7 @@ module RedisIPC
       @redis.add_to_stream(entry)
 
       # The mailbox is a Concurrent::MVar which allows us to wait for data to be added (or timeout)
+      # This is handled in Ledger::Consumer
       case (result = mailbox.take(@ledger.options[:entry_timeout]))
       when Concurrent::MVar::TIMEOUT
         raise TimeoutError
