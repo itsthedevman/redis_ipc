@@ -15,10 +15,12 @@ module RedisIPC
 
     def on_request(&block)
       @on_request = block
+      self
     end
 
     def on_error(&block)
       @on_error = block
+      self
     end
 
     def connect(redis_options: {}, **options)

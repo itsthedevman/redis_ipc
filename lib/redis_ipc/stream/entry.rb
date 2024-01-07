@@ -23,7 +23,18 @@ module RedisIPC
       def self.from_redis(redis_id, data)
         return if data.blank?
 
-        new(redis_id: redis_id, **data.symbolize_keys)
+        data.symbolize_keys!
+
+        # JSON support
+        if data[:content].is_a?(String)
+          data[:content] = begin
+            JSON.parse(data[:content])
+          rescue
+            data[:content]
+          end
+        end
+
+        new(redis_id: redis_id, **data)
       rescue
         nil
       end
@@ -45,7 +56,14 @@ module RedisIPC
       end
 
       def to_h
-        super.except(:redis_id)
+        super.tap do |hash|
+          hash.delete(:redis_id) # No need to send
+
+          # Allow Hash/Array
+          if !hash[:content].is_a?(String)
+            hash[:content] = hash[:content].to_json
+          end
+        end
       end
 
       #
