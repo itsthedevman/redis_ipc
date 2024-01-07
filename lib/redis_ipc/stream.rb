@@ -6,8 +6,8 @@ module RedisIPC
     class_attribute :group_name
 
     def initialize(stream, group)
-      self.stream_name = stream
-      self.group_name = group
+      self.stream_name = stream.to_s
+      self.group_name = group.to_s
 
       @on_request = nil
       @on_error = nil
