@@ -24,7 +24,7 @@ The `redis_ipc` gem provides a simple way to implement [Inter-Process Communicat
 Add this line to your application's Gemfile:
 
 ```ruby
-gem 'redis_ipc'
+gem "redis_ipc"
 ```
 
 And then execute:
