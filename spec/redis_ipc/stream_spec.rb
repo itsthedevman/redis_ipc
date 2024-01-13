@@ -133,4 +133,20 @@ describe RedisIPC::Stream do
       end
     end
   end
+
+  describe "Timeout" do
+    context "when an entry times out" do
+      before do
+        stream.connect(**redis_commands_opts.merge(ledger: {entry_timeout: 0.01}))
+      end
+
+      it "raises and removes the entry from Redis" do
+        expect {
+          stream.send_to_group(content: "Hello", to: "this_group_doesnt_exist")
+        }.to raise_error(RedisIPC::TimeoutError)
+
+        expect(redis_commands.entries_size).to eq(0)
+      end
+    end
+  end
 end
