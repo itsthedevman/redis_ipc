@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-describe RedisIPC::EventStream do
+describe RedisIPC::Channel do
   include_context "stream"
 
   describe ".stream" do
@@ -28,7 +28,7 @@ describe RedisIPC::EventStream do
         group "endpoint_1"
 
         event :echo, params: [:message] do
-          raise "No message" if params[:message].blank?
+          raise "Blank message" if params[:message].blank?
 
           params[:message]
         end
@@ -53,8 +53,8 @@ describe RedisIPC::EventStream do
     end
 
     describe ".trigger_event" do
-      context "Success" do
-        it "successfully calls the event and returns the result" do
+      context "when the event fulfills the request" do
+        it "returns a fulfilled event that contains the result" do
           result = event_stream_1.trigger_event(:echo, params: {message: "Hello world!"}, target: :endpoint_2)
 
           expect(result).to be_instance_of(RedisIPC::Stream::Entry)
@@ -64,14 +64,14 @@ describe RedisIPC::EventStream do
         end
       end
 
-      context "when the event rejects being triggered" do
+      context "when the event raises an error" do
         it "returns an rejected entry that contains the error" do
-          result = event_stream_1.trigger_event(:echo, target: :endpoint_2)
+          result = event_stream_1.trigger_event(:echo, params: {message: ""}, target: :endpoint_2)
 
           expect(result).to be_instance_of(RedisIPC::Stream::Entry)
           expect(result.fulfilled?).to be false
           expect(result.rejected?).to be true
-          expect(result.content).to eq("No message")
+          expect(result.content).to eq("Blank message")
         end
       end
     end

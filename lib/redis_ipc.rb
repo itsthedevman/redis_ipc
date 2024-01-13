@@ -26,7 +26,7 @@ module RedisIPC
 end
 
 [
-  "event_stream",
+  "channel",
   "stream",
   "stream/commands",
   "stream/consumer",
