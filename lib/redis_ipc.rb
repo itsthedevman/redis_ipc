@@ -27,6 +27,7 @@ end
 
 [
   "channel",
+  "response",
   "stream",
   "stream/commands",
   "stream/consumer",

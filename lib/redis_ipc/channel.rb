@@ -74,6 +74,13 @@ module RedisIPC
     end
 
     #
+    # Is the channel connected to the stream?
+    #
+    def self.connected?
+      !!@stream&.connected?
+    end
+
+    #
     # Defines an event that can be triggered from other groups
     #
     # @param event_id [String, Symbol] A unique name of this event

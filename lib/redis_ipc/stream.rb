@@ -5,6 +5,12 @@ module RedisIPC
     class_attribute :stream_name
     class_attribute :group_name
 
+    #
+    # Joins a Stream with the given name and creates the group with the given name
+    #
+    # @param stream [String] The name of the Stream
+    # @param group [String] The name of the group to connect as. This must be unique!
+    #
     def initialize(stream, group)
       self.stream_name = stream.to_s
       self.group_name = group.to_s
@@ -13,16 +19,75 @@ module RedisIPC
       @on_error = nil
     end
 
+    #
+    # Sets the on_request callback that is called when the group receives an inbound request entry
+    #
+    # @param &block [Proc] This callback is provided a single argument which is the inbound request entry
+    #
     def on_request(&block)
       @on_request = block
       self
     end
 
+    #
+    # Sets the on_error callback that is called if some part of the process raises an exception
+    #
+    # @param &block [Proc] This callback is provided a single argument which is the exception
+    #
     def on_error(&block)
       @on_error = block
       self
     end
 
+    #
+    # Creates the consumers/dispatchers and connects to the stream
+    #
+    # @param redis_options [Hash] The connection options passed into Redis. See redis_rb
+    # @param **options [Hash] Configuration options for Stream, Consumer, Dispatcher, and Ledger
+    #
+    # @option options [Logger, NilClass] :logger
+    #   An optional logger instance to enable logging
+    #   Default: nil
+    #
+    # @option options [Integer] :pool_size
+    #   The size of the pool of Redis clients to make available for sending.
+    #   The stream will automatically configure the required number of Redis clients for reading.
+    #   Ignored if max_pool_size is set
+    #   Default: 10
+    #
+    # @option options [Integer, NilClass] :max_pool_size
+    #   When provided, this force sets the Redis client pool size to be max_pool_size.
+    #   This disables the automatic configuration mentioned above
+    #   Default: nil
+    #
+    # @option options [Hash] :ledger
+    #   Configuration options for the ledger
+    # @option ledger [Integer] :entry_timeout
+    #   How long should it take before the entry is considered timed-out when sending requests
+    #   Default: 5 (seconds)
+    # @option ledger [Integer] :cleanup_interval
+    #   How often should the ledger check for expired entries before removing them
+    #   Default: 1 (second)
+    #
+    # @option options [Hash] :consumer
+    #   Configuration options for the Consumers
+    # @option consumer [Integer] :pool_size
+    #   How many Consumers should be created for processing entries. These will be load balanced by the Dispatchers
+    #   Default: 10
+    # @option consumer [Integer] :execution_interval
+    #   How often should the consumer check for entries to be processed
+    #   Default: 0.001 (seconds. This is 1ms)
+    #
+    # @option options [Hash] :dispatcher
+    # @option consumer [Integer] :pool_size
+    #   How many Dispatchers should be created for processing entries
+    #   Default: 3
+    # @option consumer [Integer] :execution_interval
+    #   How often should the Dispatcher check for entries to be dispatched
+    #   Default: 0.001 (seconds. This is 1ms)
+    #
+    # @return [RedisIPC::Stream] self
+    #
     def connect(redis_options: {}, **options)
       check_for_valid_configuration!
 
@@ -69,10 +134,18 @@ module RedisIPC
       self
     end
 
+    #
+    # Is the Stream connected or not?
+    #
+    # @return [Boolean]
+    #
     def connected?
       !@consumers.nil? && !@dispatchers.nil?
     end
 
+    #
+    # Disconnects the Stream from Redis and stops processing entries
+    #
     def disconnect
       # #connect might've not been called...
       @dispatchers&.each(&:stop_listening)
@@ -87,12 +160,30 @@ module RedisIPC
       self
     end
 
+    #
+    # Sends data (content) to a group on the Stream
+    #
+    # @param content [Object] The data to send. Must be JSON compatible
+    # @param to [String] The group to send the content to
+    #
+    # @return [RedisIPC::Response] The result of the data
+    #   Use #fulfilled? to check if the request was a success
+    #   If fulfilled, use #value to get the value
+    #   Use #rejected? to check if the request was rejected or raised an exception
+    #   If rejected, use #reason to get the reason. This could be anything, but likely a String or an error instance
+    #
     def send_to_group(content:, to:)
       check_for_ledger!
 
       track_and_send(content, to)
     end
 
+    #
+    # Used when responding to a request, this marks the entry as fulfilled and sends it back to the sending group
+    #
+    # @param entry [RedisIPC::Stream::Entry] The request entry to respond to
+    # @param content [Object] The data to send back
+    #
     def fulfill_request(entry, content:)
       check_for_ledger!
       @redis.add_to_stream(entry.fulfilled(content: content))
@@ -100,6 +191,12 @@ module RedisIPC
       nil
     end
 
+    #
+    # Used when responding to a request, this marks the entry as rejected and sends it back to the sending group
+    #
+    # @param entry [RedisIPC::Stream::Entry] The request entry to respond to
+    # @param content [Object] The data to send back
+    #
     def reject_request(entry, content:)
       check_for_ledger!
       @redis.add_to_stream(entry.rejected(content: content))
@@ -165,12 +262,17 @@ module RedisIPC
       # The mailbox is a Concurrent::MVar which allows us to wait for data to be added (or timeout)
       # This is handled in Ledger::Consumer
       case (result = mailbox.take(@ledger.options[:entry_timeout]))
-      when Concurrent::MVar::TIMEOUT
-        raise TimeoutError
+      when Stream::Entry
+        if result.fulfilled?
+          Response.fulfilled(result.content)
+        else
+          Response.rejected(result.content)
+        end
       when StandardError
-        raise result
+        Response.rejected(result)
       else
-        result
+        # Concurrent::MVar::TIMEOUT
+        Response.rejected(TimeoutError.new)
       end
     ensure
       @ledger.delete_entry(entry)

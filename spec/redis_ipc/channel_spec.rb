@@ -57,10 +57,10 @@ describe RedisIPC::Channel do
         it "returns a fulfilled event that contains the result" do
           result = event_stream_1.trigger_event(:echo, params: {message: "Hello world!"}, target: :endpoint_2)
 
-          expect(result).to be_instance_of(RedisIPC::Stream::Entry)
+          expect(result).to be_instance_of(RedisIPC::Response)
           expect(result.fulfilled?).to be true
           expect(result.rejected?).to be false
-          expect(result.content).to eq("Hello world!")
+          expect(result.value).to eq("Hello world!")
         end
       end
 
@@ -68,10 +68,12 @@ describe RedisIPC::Channel do
         it "returns an rejected entry that contains the error" do
           result = event_stream_1.trigger_event(:echo, params: {message: ""}, target: :endpoint_2)
 
-          expect(result).to be_instance_of(RedisIPC::Stream::Entry)
+          expect(result).to be_instance_of(RedisIPC::Response)
           expect(result.fulfilled?).to be false
+          expect(result.value).to be_nil
+
           expect(result.rejected?).to be true
-          expect(result.content).to eq("Blank message")
+          expect(result.reason).to eq("Blank message")
         end
       end
     end

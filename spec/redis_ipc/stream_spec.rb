@@ -126,10 +126,10 @@ describe RedisIPC::Stream do
     context "when an entry is sent" do
       it "receives a response" do
         response = stream.send_to_group(content: "Hello", to: "other_group")
-        expect(response).to be_instance_of(described_class::Entry)
+        expect(response).to be_instance_of(RedisIPC::Response)
         expect(response.fulfilled?).to be true
 
-        expect(response.content).to eq("Hello back")
+        expect(response.value).to eq("Hello back")
       end
     end
   end
@@ -141,9 +141,11 @@ describe RedisIPC::Stream do
       end
 
       it "raises and removes the entry from Redis" do
-        expect {
-          stream.send_to_group(content: "Hello", to: "this_group_doesnt_exist")
-        }.to raise_error(RedisIPC::TimeoutError)
+        response = stream.send_to_group(content: "Hello", to: "this_group_doesnt_exist")
+        expect(response).to be_instance_of(RedisIPC::Response)
+        expect(response.fulfilled?).to be false
+        expect(response.rejected?).to be true
+        expect(response.value).to be_nil
 
         expect(redis_commands.entries_size).to eq(0)
       end
