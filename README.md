@@ -234,7 +234,7 @@ end
 WebChannel.connect
 ```
 
-The worker will also need a new class created:
+The worker will also need a new class created in its own codebase:
 
 ```rb
 class WorkerChannel < RedisIPC::Channel
@@ -268,11 +268,9 @@ if response.fulfilled?
 end
 ```
 
-The worker can also trigger web events but let's save that for something special.
-
 ### Channels (and Streams) can support n-number of endpoints
 
-Let's say you now need a tracker program to trigger web notifications when it starts to track an event. Since Streams can support n-number of endpoints, so can Channels. Let's add a new class to the tracker program:
+Now that the website and worker are communicating, you find yourself needing a tracker program to trigger web notifications when it starts to track an event. Since Streams can support n-number of endpoints, so can Channels. Let's add a new class to the tracker program:
 
 ```rb
 class TrackerChannel < RedisIPC::Channel
