@@ -9,7 +9,7 @@ module RedisIPC
         pool_size: 10,
 
         # How often does the consumer check for new entries
-        execution_interval: 0.01
+        execution_interval: 0.001 # 1ms
       }.freeze
 
       attr_reader :name, :redis

@@ -11,7 +11,7 @@ module RedisIPC
         pool_size: 3,
 
         # How often should the consumer process entries in seconds
-        execution_interval: 0.01
+        execution_interval: 0.001 # 1ms
       }.freeze
 
       def initialize(name, **)
