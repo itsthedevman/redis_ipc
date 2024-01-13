@@ -29,7 +29,7 @@ Gem::Specification.new do |spec|
   #####################################
   # Dependencies
   #
-  spec.add_dependency "activesupport", "~> 7.1"
+  spec.add_dependency "activesupport", "~> 6.1"
   spec.add_dependency "concurrent-ruby", "~> 1.2"
   spec.add_dependency "concurrent-ruby-ext", "~> 1.2"
   spec.add_dependency "connection_pool", "~> 2.4"
