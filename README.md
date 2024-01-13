@@ -184,13 +184,16 @@ response = parent_stream.send_to_group(content: "Please do this task for me, chi
 
 # Handle the child's reaction
 if response.fulfilled?
-  puts "Child said: #{response.content}"
+  puts "Child said: #{response.value}"
   exit 0
 end
 
 # The child is throwing a tantrum
 response = parent_stream.send_to_group(content: "Child, I will not ask again", to: "child")
-exit 1 if response.rejected? # Why yes, this is totally reasonable parenting (sarcasm)
+if response.rejected? # Why yes, this is totally reasonable parenting (sarcasm)
+  puts "The child's reasoning is #{response.reason}"
+  exit 1
+end
 ```
 
 ## `RedisIPC::Channel`
@@ -289,6 +292,46 @@ response = TrackerChannel.trigger_event(
   target: "web"
 )
 response.status #=> :fulfilled
+```
+
+### Exceptions in events
+
+Whenever an exception is raised, or an entry is manually rejected like in a Stream (see Timeouts below), the response will be in a rejected state and the reason for the rejection can be accessed using `#reason`.
+```rb
+class Buggy < RedisIPC::Channel
+  stream "example"
+  channel "buggy"
+
+  event(:raise_exception) { raise "I told you!" }
+  connect
+end
+
+class Endpoint < RedisIPC::Channel
+  stream "example"
+  channel "endpoint"
+  connect
+end
+
+response = Endpoint.trigger_event(:raise_exception, target: "buggy")
+response.rejected? #=> true
+response.reason #=> "I told you!"
+```
+
+## Timeouts
+
+When a Stream, or Channel, hits the timeout on an outbound request the resulting response will be rejected with a TimeoutError.
+
+```rb
+
+stream = RedisIPC::Stream.new("example", "group")
+stream.on_request {}
+stream.on_error {}
+stream.connect
+
+# This will block until `entry_timeout` is hit. By default, this will take 5 seconds
+response = stream.send_to_group(content: "This message will never get there", to: "a_group_that_does_not_exist")
+response.state #=> :rejected
+response.reason #=> #<RedisIPC::TimeoutError: RedisIPC::TimeoutError>
 ```
 
 ## Contributing
