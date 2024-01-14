@@ -125,8 +125,7 @@ module RedisIPC
         **options.slice(:logger, :reset)
       )
 
-      # Recreate the group
-      @redis.destroy_group
+      # Make sure the group is there
       @redis.create_group
 
       @ledger = Ledger.new(options[:ledger])
@@ -288,6 +287,12 @@ module RedisIPC
       when StandardError
         Response.rejected(result)
       else
+        log("Timeout! Removing #{entry.id}")
+
+        # Since a consumer possibly hasn't picked up the entry, let's go ahead and ensure its removed
+        @redis.acknowledge_entry(entry)
+        @redis.delete_entry(entry)
+
         # Concurrent::MVar::TIMEOUT
         Response.rejected(TimeoutError.new)
       end
