@@ -28,7 +28,7 @@ module RedisIPC
         # JSON support
         if data[:content].is_a?(String)
           data[:content] = begin
-            JSON.parse(data[:content])
+            JSON.parse(data[:content], symbolize_names: true)
           rescue
             data[:content]
           end
