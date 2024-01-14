@@ -57,6 +57,8 @@ module RedisIPC
     # @see Stream#connect for accepted arguments
     #
     def self.connect(**)
+      raise ConnectionError, "Channel #{group_name} is already connected" if connected?
+
       @stream = Stream.new(stream_name, group_name)
         .on_request(&method(:on_request))
         .on_error { |e| on_error&.call(e) }
@@ -77,7 +79,9 @@ module RedisIPC
     # Is the channel connected to the stream?
     #
     def self.connected?
-      !!@stream&.connected?
+      return false if @stream.nil?
+
+      @stream.connected?
     end
 
     #
