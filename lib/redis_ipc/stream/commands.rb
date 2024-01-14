@@ -37,26 +37,16 @@ module RedisIPC
 
         redis_options = REDIS_DEFAULTS.merge(redis_options)
         @redis_pool = ConnectionPool.new(size: max_pool_size) { Redis.new(**redis_options) }
-        @logger = logger
-
-        log("Initialized with max_pool_size of #{max_pool_size}")
       end
 
-      #
-      # Logs content to a logger instance if one is defined
-      #
-      # @param content [Any]
-      #
-      def log(content)
-        @logger&.debug("<#{stream_name}:#{group_name}> #{content}")
+      def log(content, severity: :debug)
+        @logger&.public_send(severity) { "<#{stream_name}:#{group_name}> #{content}" }
       end
 
       #
       # Gracefully shutdown the redis pool
       #
       def shutdown
-        log("Shutting down")
-
         redis_pool.shutdown(&:close)
       end
 
@@ -78,11 +68,7 @@ module RedisIPC
       #
       def add_to_stream(entry)
         redis_id = redis_pool.with { |redis| redis.xadd(stream_name, entry.to_h) }
-        entry = entry.with(redis_id: redis_id)
-
-        log("Adding entry:\n#{entry}")
-
-        entry
+        entry.with(redis_id: redis_id)
       end
 
       #
@@ -91,8 +77,6 @@ module RedisIPC
       # @param entry [RedisIPC::Stream::Entry]
       #
       def acknowledge_entry(entry)
-        log("Acknowledging: #{entry.id}")
-
         redis_pool.with do |redis|
           suppress(Redis::CommandError) do
             redis.xack(stream_name, group_name, entry.redis_id)
@@ -106,8 +90,6 @@ module RedisIPC
       # @param entry [RedisIPC::Stream::Entry]
       #
       def delete_entry(entry)
-        log("Deleting: #{entry.id}")
-
         redis_pool.with do |redis|
           suppress(Redis::CommandError) do
             redis.xdel(stream_name, entry.redis_id)
@@ -119,8 +101,6 @@ module RedisIPC
       # Checks if the Stream group has been created and creates it if it hasn't
       #
       def create_group
-        log("Creating group")
-
         redis_pool.with do |redis|
           suppress(Redis::CommandError) do
             redis.xgroup(:create, stream_name, group_name, "$", mkstream: true)
@@ -132,8 +112,6 @@ module RedisIPC
       # Removes the group from the stream
       #
       def destroy_group
-        log("Destroying group")
-
         redis_pool.with do |redis|
           suppress(Redis::CommandError) do
             redis.xgroup(:destroy, stream_name, group_name)
@@ -147,8 +125,6 @@ module RedisIPC
       # Deletes the stream from Redis
       #
       def delete_stream
-        log("Destroying stream")
-
         redis_pool.with do |redis|
           redis.del(stream_name)
         end
@@ -160,8 +136,6 @@ module RedisIPC
       # @param consumer [RedisIPC::Stream::Consumer] The consumer processing this request
       #
       def create_consumer(consumer)
-        log("Adding #{consumer.name} to stream")
-
         redis_pool.with do |redis|
           redis.xgroup(:createconsumer, stream_name, group_name, consumer.name)
         end
@@ -173,8 +147,6 @@ module RedisIPC
       # @param consumer [RedisIPC::Stream::Consumer] The consumer processing this request
       #
       def delete_consumer(consumer)
-        log("Removing #{consumer.name} from stream")
-
         redis_pool.with do |redis|
           redis.xgroup(:delconsumer, stream_name, group_name, consumer.name)
         end
@@ -311,8 +283,6 @@ module RedisIPC
       # Clears the array of available consumers for this group
       #
       def clear_available_consumers
-        log("Cleared available consumers")
-
         redis_pool.with { |redis| redis.del(available_redis_consumers_key) }
       end
 
@@ -327,8 +297,6 @@ module RedisIPC
         redis_pool.with do |redis|
           redis.lpush(available_redis_consumers_key, consumer.name)
         end
-
-        log("Consumer #{consumer.name} is now available")
 
         true
       end
@@ -345,8 +313,6 @@ module RedisIPC
           # 0 is remove all
           redis.lrem(available_redis_consumers_key, 0, consumer.name)
         end
-
-        log("Consumer #{consumer.name} is no longer available")
 
         true
       end

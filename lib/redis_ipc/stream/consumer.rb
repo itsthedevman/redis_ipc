@@ -101,8 +101,8 @@ module RedisIPC
 
         @task.execute
         change_availability
-        log("Listening for entries")
 
+        log("Ready")
         @task
       end
 
@@ -113,6 +113,7 @@ module RedisIPC
         @task.shutdown
         change_availability
 
+        log("Stopped")
         true
       end
 
@@ -135,7 +136,6 @@ module RedisIPC
         entry = read_from_stream
         return if invalid_entry?(entry)
 
-        log("Processing entry:\n#{entry}")
         entry
       ensure
         acknowledge_and_remove(entry)
@@ -143,8 +143,8 @@ module RedisIPC
 
       private
 
-      def log(content)
-        @logger&.debug("<#{stream_name}:#{group_name}:#{name}> #{content}")
+      def log(content, severity: :info)
+        @logger&.public_send(severity) { "<#{stream_name}:#{group_name} #{name}> #{content}" }
       end
 
       #
@@ -172,12 +172,6 @@ module RedisIPC
         return if entry.nil?
 
         @redis.acknowledge_entry(entry)
-      end
-
-      def remove_entry(entry)
-        return if entry.nil?
-
-        @redis.delete_entry(entry)
       end
 
       def acknowledge_and_remove(entry)

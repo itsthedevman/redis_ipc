@@ -56,13 +56,15 @@ module RedisIPC
     # Connects to the stream and starts processing any requests
     # @see Stream#connect for accepted arguments
     #
-    def self.connect(**)
+    def self.connect(**options)
       raise ConnectionError, "Channel #{group_name} is already connected" if connected?
 
       @stream = Stream.new(stream_name, group_name)
         .on_request(&method(:on_request))
         .on_error { |e| on_error&.call(e) }
-        .connect(**)
+        .connect(**options)
+
+      @logger = options[:logger]
 
       true
     end
@@ -130,18 +132,18 @@ module RedisIPC
         return
       end
 
-      event_container = events[event_data["event"]]
+      event_container = events[event_data[:event]]
       if event_container.nil?
         @stream.reject_request(
           entry,
-          content: "Unsupported event triggered: #{event_data["event"]}"
+          content: "Unsupported event. Given #{event_data[:event]}"
         )
 
         return
       end
 
       begin
-        result = event_container.execute(event_data["params"])
+        result = event_container.execute(event_data[:params], logger: @logger)
         @stream.fulfill_request(entry, content: result)
       rescue => e
         @stream.reject_request(entry, content: e.message)
@@ -161,8 +163,13 @@ module RedisIPC
         @params = nil
       end
 
-      def execute(params)
+      def execute(params, logger: nil)
         @params = params.with_indifferent_access.slice(*@params_layout)
+
+        if logger && params.size != @params_layout.size
+          logger.warn("Unexpected parameters: #{params.keys - @params_layout}")
+        end
+
         instance_exec(&@callback)
       ensure
         @params = nil

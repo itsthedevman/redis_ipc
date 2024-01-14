@@ -20,7 +20,6 @@ module RedisIPC
 
       def listen
         check_for_consumers!
-        log("Listening for entries")
 
         super
       end
@@ -43,8 +42,6 @@ module RedisIPC
           return
         end
 
-        log("Processing entry:\n#{entry}")
-
         consumer = find_load_balanced_consumer
         if consumer.nil?
           # TODO: Change this to raise so it bubbles up to the stream - consider what to do with the entry.
@@ -52,7 +49,7 @@ module RedisIPC
           return
         end
 
-        log("Dispatched to #{consumer.name}: #{entry.id}")
+        log("Dispatching to #{consumer.name}: #{entry.id}")
 
         @redis.claim_entry(consumer, entry)
       end

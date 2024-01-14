@@ -117,6 +117,7 @@ module RedisIPC
         (options.dig(:dispatcher, :pool_size) * 2)
       )
 
+      @logger = options[:logger]
       @redis = Commands.new(
         stream_name, group_name,
         max_pool_size: max_pool_size,
@@ -124,6 +125,7 @@ module RedisIPC
         **options.slice(:logger, :reset)
       )
 
+      # Recreate the group
       @redis.destroy_group
       @redis.create_group
 
@@ -131,6 +133,7 @@ module RedisIPC
       @consumers = create_consumers(options[:consumer])
       @dispatchers = create_dispatchers(options[:dispatcher])
 
+      log("Connected")
       self
     end
 
@@ -156,6 +159,8 @@ module RedisIPC
       @consumers = nil
       @ledger = nil
       @redis = nil
+
+      log("Disconnected")
 
       self
     end
@@ -186,6 +191,9 @@ module RedisIPC
     #
     def fulfill_request(entry, content:)
       check_for_ledger!
+
+      log("Fulfilling entry #{entry.id} from \"#{entry.destination_group}\" with: #{content}")
+
       @redis.add_to_stream(entry.fulfilled(content: content))
 
       nil
@@ -199,12 +207,19 @@ module RedisIPC
     #
     def reject_request(entry, content:)
       check_for_ledger!
+
+      log("Rejecting entry #{entry.id} from \"#{entry.destination_group}\" with: #{content}")
+
       @redis.add_to_stream(entry.rejected(content: content))
 
       nil
     end
 
     private
+
+    def log(content, severity: :info)
+      @logger&.public_send(severity) { "<#{stream_name}:#{group_name}> #{content}" }
+    end
 
     def handle_entry(entry)
       instance_exec(entry, &@on_request)
@@ -254,6 +269,8 @@ module RedisIPC
     def track_and_send(content, destination_group)
       entry = Entry.new(content: content, source_group: group_name, destination_group: destination_group)
 
+      log("Sending entry #{entry.id} to \"#{entry.destination_group}\" with: #{entry.content}")
+
       # The entry must be added to the ledger before adding to the stream as that, in testing, the consumers can
       # get ahold of the entry before the ledger has everything ready.
       mailbox = @ledger.store_entry(entry)
@@ -276,9 +293,6 @@ module RedisIPC
       end
     ensure
       @ledger.delete_entry(entry)
-
-      @redis.acknowledge_entry(entry)
-      @redis.delete_entry(entry)
     end
   end
 end
