@@ -159,8 +159,9 @@ module RedisIPC
 
       def initialize(params, &callback)
         @params_layout = params
-        @callback = callback
         @params = nil
+
+        define_singleton_method(:execute_callback, &callback)
       end
 
       def execute(params, logger: nil)
@@ -170,7 +171,7 @@ module RedisIPC
           logger.warn("Unexpected parameters: #{params.keys - @params_layout}")
         end
 
-        instance_exec(&@callback)
+        execute_callback
       ensure
         @params = nil
       end
