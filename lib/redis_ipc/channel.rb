@@ -56,15 +56,13 @@ module RedisIPC
     # Connects to the stream and starts processing any requests
     # @see Stream#connect for accepted arguments
     #
-    def self.connect(**options)
+    def self.connect(**)
       raise ConnectionError, "Channel #{group_name} is already connected" if connected?
 
       @stream = Stream.new(stream_name, group_name)
         .on_request(&method(:on_request))
         .on_error { |e| on_error&.call(e) }
-        .connect(**options)
-
-      @logger = options[:logger]
+        .connect(**)
 
       true
     end
@@ -143,7 +141,7 @@ module RedisIPC
       end
 
       begin
-        result = event_container.execute(event_data[:params], logger: @logger)
+        result = event_container.execute(event_data[:params])
         @stream.fulfill_request(entry, content: result)
       rescue => e
         @stream.reject_request(entry, content: e.message)
@@ -164,13 +162,8 @@ module RedisIPC
         define_singleton_method(:execute_callback, &callback)
       end
 
-      def execute(params, logger: nil)
+      def execute(params)
         @params = params.with_indifferent_access.slice(*@params_layout)
-
-        if logger && params.size != @params_layout.size
-          logger.warn("Unexpected parameters: #{params.keys - @params_layout}")
-        end
-
         execute_callback
       ensure
         @params = nil
