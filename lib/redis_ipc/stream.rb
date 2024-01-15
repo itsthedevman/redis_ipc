@@ -207,7 +207,10 @@ module RedisIPC
     def reject_request(entry, content:)
       check_for_ledger!
 
-      log("Rejecting entry #{entry.id} from \"#{entry.destination_group}\" with: #{content}")
+      log(
+        "Rejecting entry #{entry.id} from \"#{entry.destination_group}\" with: #{content}",
+        severity: :warn
+      )
 
       @redis.add_to_stream(entry.rejected(content: content))
 
