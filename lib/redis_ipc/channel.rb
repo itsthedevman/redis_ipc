@@ -144,7 +144,10 @@ module RedisIPC
         result = event_container.execute(event_data[:params])
         @stream.fulfill_request(entry, content: result)
       rescue => e
-        @stream.reject_request(entry, content: e.message)
+        @stream.reject_request(
+          entry,
+          content: {class: e.class, message: e.message, backtrace: e.backtrace}
+        )
       end
     end
 
