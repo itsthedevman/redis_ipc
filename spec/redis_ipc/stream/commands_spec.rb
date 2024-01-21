@@ -381,20 +381,6 @@ describe RedisIPC::Stream::Commands do
     end
   end
 
-  describe "#clear_available_consumers" do
-    let!(:consumer) { create_consumer }
-
-    subject(:deletion) { redis_commands.clear_available_consumers }
-
-    before { consumer.listen }
-
-    it "deletes the key" do
-      expect(redis_commands.available_consumer_names).to include(consumer.name)
-      expect(deletion).to eq(1)
-      expect(redis_commands.available_consumer_names).to be_empty
-    end
-  end
-
   describe "#consumer_available?" do
     let(:consumer) { create_consumer }
 

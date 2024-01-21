@@ -113,10 +113,6 @@ describe RedisIPC::Stream do
         fulfill_request(entry, content: "#{entry.content} back")
       end
 
-      other_stream.on_error do |exception|
-        puts(message: exception.message, backtrace: exception.backtrace)
-      end
-
       other_stream.connect(**redis_commands_opts)
       stream.connect(**redis_commands_opts)
     end

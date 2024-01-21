@@ -43,8 +43,8 @@ describe RedisIPC::Channel do
     end
 
     before do
-      event_stream_1.connect
-      event_stream_2.connect
+      event_stream_1.connect(logger: logger)
+      event_stream_2.connect(logger: logger)
     end
 
     after do
@@ -73,7 +73,7 @@ describe RedisIPC::Channel do
           expect(result.value).to be_nil
 
           expect(result.rejected?).to be true
-          expect(result.reason).to eq("Blank message")
+          expect(result.reason).to include("Blank message")
         end
       end
     end
