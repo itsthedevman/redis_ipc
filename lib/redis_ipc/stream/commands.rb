@@ -32,23 +32,22 @@ module RedisIPC
         # A unique ID to the stream instance. This allows the same stream group be created across multiple
         # instances, or processes, without having inbound responses being dispatched to an instance that
         # isn't currently tracking that request/response
-        @instance_id = SecureRandom.uuid.delete("-")[0..10]
+        @instance_id = SecureRandom.uuid.delete("-")[0..5]
 
-        # A few problems lead me to this solution.
-        # 1. Differentiating between
-        @stream_name = "#{stream_name}:#{@instance_id}"
-
+        @stream_name = stream_name
         @group_name = group_name
 
         raise ArgumentError, "Stream name cannot be blank" if stream_name.blank?
         raise ArgumentError, "Group name cannot be blank" if group_name.blank?
+
+        @logger = logger
 
         redis_options = REDIS_DEFAULTS.merge(redis_options)
         @redis_pool = ConnectionPool.new(size: max_pool_size) { Redis.new(**redis_options) }
       end
 
       def log(content, severity: :debug)
-        @logger&.public_send(severity) { "<#{stream_name}:#{group_name}> #{content}" }
+        @logger&.public_send(severity) { "<#{stream_name}:#{group_name}:#{instance_id}> #{content}" }
       end
 
       #
@@ -76,6 +75,8 @@ module RedisIPC
       #
       def add_to_stream(entry)
         redis_id = redis_pool.with { |redis| redis.xadd(stream_name, entry.to_h) }
+        log("add_to_stream - Entry ID: #{entry.id}, Redis ID: #{redis_id}")
+
         entry.with(redis_id: redis_id)
       end
 
@@ -169,16 +170,15 @@ module RedisIPC
       #
       # @return [RedisIPC::Stream::Entry]
       #
-      def read_from_stream(consumer, read_id, no_ack: false)
+      def read_from_stream(consumer, read_id, block: 500)
         # To avoid this key becoming stale while the instance is still running.
         set_expiry(available_consumers_key, ttl: 1.day)
-        set_expiry(available_stream_instances_key, ttl: 0.01)
 
         result = redis_pool.with do |redis|
           redis.xreadgroup(
             group_name, consumer.name, stream_name, read_id,
             count: 1,
-            noack: no_ack
+            block: block
           )&.values&.flatten
         end
 
@@ -194,8 +194,8 @@ module RedisIPC
       #
       # @return [RedisIPC::Stream::Entry]
       #
-      def next_unread_entry(consumer)
-        read_from_stream(consumer, READ_FROM_STREAM)
+      def next_unread_entry(consumer, **)
+        read_from_stream(consumer, READ_FROM_STREAM, **)
       end
 
       #
@@ -205,8 +205,8 @@ module RedisIPC
       #
       # @return [RedisIPC::Stream::Entry]
       #
-      def next_pending_entry(consumer)
-        read_from_stream(consumer, READ_FROM_PEL)
+      def next_pending_entry(consumer, **)
+        read_from_stream(consumer, READ_FROM_PEL, **)
       end
 
       #

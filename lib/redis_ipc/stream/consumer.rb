@@ -103,7 +103,7 @@ module RedisIPC
         @task.execute
         change_availability
 
-        log("Ready")
+        log("Ready", severity: :debug)
         @task
       end
 
@@ -114,7 +114,7 @@ module RedisIPC
         @task.shutdown
         change_availability
 
-        log("Stopped")
+        log("Stopped", severity: :debug)
         true
       end
 
@@ -145,7 +145,9 @@ module RedisIPC
       private
 
       def log(content, severity: :info)
-        @logger&.public_send(severity) { "<#{stream_name}:#{group_name} #{name}> #{content}" }
+        @logger&.public_send(severity) do
+          "<#{stream_name}:#{group_name}:#{name}> #{content}"
+        end
       end
 
       #

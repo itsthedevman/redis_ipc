@@ -4,7 +4,7 @@ RSpec.shared_context("stream") do
   let!(:stream_name) { "example_stream" }
   let!(:group_name) { "example_group" }
 
-  let(:logger) { Logger.new($stdout) }
+  let(:logger) { Logger.new($stdout, level: :info) }
 
   let!(:redis_commands_opts) { {logger: logger} }
   let!(:redis_commands) do

@@ -48,7 +48,7 @@ module RedisIPC
       # @param destination_group [String] The group that will receive this entry
       #
       def initialize(id: nil, redis_id: nil, status: nil, **)
-        id ||= SecureRandom.uuid.delete("-")
+        id ||= SecureRandom.uuid.delete("-")[0..20]
         status ||= STATUS_PENDING
         raise ArgumentError, "Status is not one of #{VALID_STATUS}" unless VALID_STATUS.include?(status)
 

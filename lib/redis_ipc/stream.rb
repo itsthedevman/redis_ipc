@@ -127,6 +127,8 @@ module RedisIPC
         **options.slice(:logger, :reset)
       )
 
+      @instance_id = @redis.instance_id
+
       # Make sure the group is there
       @redis.create_group
 
@@ -222,7 +224,7 @@ module RedisIPC
     private
 
     def log(content, severity: :info)
-      @logger&.public_send(severity) { "<#{stream_name}:#{group_name}> #{content}" }
+      @logger&.public_send(severity) { "<#{stream_name}:#{group_name}:#{@instance_id}> #{content}" }
     end
 
     def handle_entry(entry)
@@ -247,7 +249,7 @@ module RedisIPC
       @redis.clear_available_consumers
 
       options[:pool_size].times.map do |index|
-        name = "consumer_#{index}"
+        name = "consumer_#{@instance_id}_#{index}"
 
         consumer = Ledger::Consumer.new(name, redis: @redis, ledger: @ledger, options: options)
         consumer.add_callback(:on_error, self, :handle_exception)
@@ -260,7 +262,7 @@ module RedisIPC
 
     def create_dispatchers(options)
       options[:pool_size].times.map do |index|
-        name = "dispatcher_#{index}"
+        name = "dispatcher_#{@instance_id}_#{index}"
 
         dispatcher = Dispatcher.new(name, redis: @redis, ledger: @ledger, options: options)
         dispatcher.add_callback(:on_error, self, :handle_exception)

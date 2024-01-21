@@ -4,25 +4,25 @@ describe RedisIPC::Channel do
   include_context "stream"
 
   describe ".stream" do
-    subject(:stream) { Class.new(described_class) }
+    subject(:channel) { Class.new(described_class) }
 
     it "sets the value" do
-      stream.stream "stream_name"
-      expect(stream.stream_name).to eq("stream_name")
+      channel.stream "stream_name"
+      expect(channel.stream_name).to eq("stream_name")
     end
   end
 
   describe ".group" do
-    subject(:stream) { Class.new(described_class) }
+    subject(:channel) { Class.new(described_class) }
 
     it "sets the value" do
-      stream.group "group_name"
-      expect(stream.group_name).to eq("group_name")
+      channel.group "group_name"
+      expect(channel.group_name).to eq("group_name")
     end
   end
 
   describe "Sending and receiving" do
-    let(:event_stream_1) do
+    let(:channel_1a) do
       Class.new(described_class) do
         stream "shared_stream"
         group "endpoint_1"
@@ -35,27 +35,36 @@ describe RedisIPC::Channel do
       end
     end
 
-    let(:event_stream_2) do
+    let(:channel_1b) { Class.new(channel_1a) }
+
+    let(:channel_2a) do
       # Inheritance supported
-      Class.new(event_stream_1) do
+      Class.new(channel_1a) do
         group "endpoint_2"
       end
     end
 
+    let(:channel_2b) { Class.new(channel_2a) }
+
     before do
-      event_stream_1.connect(logger: logger)
-      event_stream_2.connect(logger: logger)
+      # Testing multiple instances for the same group
+      channel_1a.connect(**redis_commands_opts)
+      channel_1b.connect(**redis_commands_opts)
+      channel_2a.connect(**redis_commands_opts)
+      channel_2b.connect(**redis_commands_opts)
     end
 
     after do
-      event_stream_1.disconnect
-      event_stream_2.disconnect
+      channel_1a.disconnect
+      channel_1b.disconnect
+      channel_2a.disconnect
+      channel_2b.disconnect
     end
 
     describe ".trigger_event" do
       context "when the event fulfills the request" do
         it "returns a fulfilled event that contains the result" do
-          result = event_stream_1.trigger_event(:echo, params: {message: "Hello world!"}, target: :endpoint_2)
+          result = channel_1a.trigger_event(:echo, params: {message: "Hello world!"}, target: :endpoint_2)
 
           expect(result).to be_instance_of(RedisIPC::Response)
           expect(result.fulfilled?).to be true
@@ -66,7 +75,7 @@ describe RedisIPC::Channel do
 
       context "when the event raises an error" do
         it "returns an rejected entry that contains the error" do
-          result = event_stream_1.trigger_event(:echo, params: {message: ""}, target: :endpoint_2)
+          result = channel_2b.trigger_event(:echo, params: {message: ""}, target: :endpoint_1)
 
           expect(result).to be_instance_of(RedisIPC::Response)
           expect(result.fulfilled?).to be false
