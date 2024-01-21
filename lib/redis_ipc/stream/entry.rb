@@ -5,7 +5,7 @@ module RedisIPC
     #
     # Represents an entry in the Redis Stream
     #
-    class Entry < Data.define(:id, :redis_id, :status, :content, :source_group, :destination_group)
+    class Entry < Data.define(:id, :redis_id, :instance_id, :status, :content, :source_group, :destination_group)
       VALID_STATUS = [
         STATUS_PENDING = "pending",
         STATUS_FULFILLED = "fulfilled",
@@ -110,6 +110,14 @@ module RedisIPC
       #
       def rejected?
         status == STATUS_REJECTED
+      end
+
+      def request?(ledger_entry, ledger: nil)
+        ledger_entry.nil? && status == STATUS_PENDING
+      end
+
+      def response?(ledger_entry, ledger: nil)
+        !ledger_entry.nil? && [STATUS_FULFILLED, STATUS_REJECTED].include?(status)
       end
     end
   end

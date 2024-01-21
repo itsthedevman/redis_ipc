@@ -14,8 +14,9 @@ module RedisIPC
         execution_interval: 0.001 # 1ms
       }.freeze
 
-      def initialize(name, **)
+      def initialize(name, ledger:, **)
         super(name, options: DEFAULTS, **)
+        @ledger = ledger
       end
 
       def listen
@@ -33,6 +34,7 @@ module RedisIPC
       #
       def check_for_entries
         entry = read_from_stream
+        return if entry.nil?
 
         # When the dispatcher reads an entry from the stream, it is added to its PEL. Acknowledge to remove it.
         # Usually, the entry is also deleted but all dispatchers receive the same entry and deleting it causes it
@@ -44,9 +46,8 @@ module RedisIPC
 
         consumer = find_load_balanced_consumer
         if consumer.nil?
-          # TODO: Change this to raise so it bubbles up to the stream - consider what to do with the entry.
-          reject!(entry, reason: "DISPATCH_FAILURE #{group_name}:#{name} failed to find a consumer")
-          return
+          acknowledge_entry(entry)
+          raise "DISPATCH_FAILURE #{group_name}:#{name} failed to find a consumer"
         end
 
         log("Dispatching to #{consumer.name}: #{entry.id}")

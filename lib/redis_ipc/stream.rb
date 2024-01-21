@@ -5,6 +5,8 @@ module RedisIPC
     class_attribute :stream_name
     class_attribute :group_name
 
+    attr_reader :redis
+
     #
     # Joins a Stream with the given name and creates the group with the given name
     #
@@ -16,7 +18,7 @@ module RedisIPC
       self.group_name = group.to_s
 
       @on_request = nil
-      @on_error = nil
+      @on_error = ->(exception) { log(exception, severity: :error) }
     end
 
     #
@@ -260,7 +262,7 @@ module RedisIPC
       options[:pool_size].times.map do |index|
         name = "dispatcher_#{index}"
 
-        dispatcher = Dispatcher.new(name, redis: @redis, options: options)
+        dispatcher = Dispatcher.new(name, redis: @redis, ledger: @ledger, options: options)
         dispatcher.add_callback(:on_error, self, :handle_exception)
         dispatcher.listen
 
@@ -269,7 +271,12 @@ module RedisIPC
     end
 
     def track_and_send(content, destination_group)
-      entry = Entry.new(content: content, source_group: group_name, destination_group: destination_group)
+      entry = Entry.new(
+        instance_id: @redis.instance_id,
+        content: content,
+        source_group: group_name,
+        destination_group: destination_group
+      )
 
       log("Sending entry #{entry.id} to \"#{entry.destination_group}\" with: #{entry.content}")
 

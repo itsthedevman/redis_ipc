@@ -11,13 +11,13 @@ module RedisIPC
       READ_FROM_PEL = "0"
       READ_FROM_STREAM = ">"
 
-      CONSUMER_PROXY = Data.define(:name, :pending, :idle, :inactive) do
+      class ConsumerProxy < Data.define(:name, :pending, :idle, :inactive)
         def initialize(name:, pending: 0, idle: 0, inactive: 0)
           super(name: name, pending: pending, idle: idle, inactive: inactive)
         end
       end
 
-      attr_reader :stream_name, :group_name, :redis_pool, :logger
+      attr_reader :stream_name, :group_name, :redis_pool, :logger, :instance_id
 
       #
       # A centralized location that holds all of the various Redis commands needed to interact with a stream
@@ -29,7 +29,15 @@ module RedisIPC
       # @param redis_options [Hash] The connection options passed into the Redis client
       #
       def initialize(stream_name, group_name, max_pool_size: 10, logger: nil, redis_options: {})
-        @stream_name = stream_name
+        # A unique ID to the stream instance. This allows the same stream group be created across multiple
+        # instances, or processes, without having inbound responses being dispatched to an instance that
+        # isn't currently tracking that request/response
+        @instance_id = SecureRandom.uuid.delete("-")[0..10]
+
+        # A few problems lead me to this solution.
+        # 1. Differentiating between
+        @stream_name = "#{stream_name}:#{@instance_id}"
+
         @group_name = group_name
 
         raise ArgumentError, "Stream name cannot be blank" if stream_name.blank?
@@ -117,7 +125,7 @@ module RedisIPC
             redis.xgroup(:destroy, stream_name, group_name)
           end
 
-          redis.del(available_redis_consumers_key)
+          redis.del(available_consumers_key)
         end
       end
 
@@ -161,9 +169,17 @@ module RedisIPC
       #
       # @return [RedisIPC::Stream::Entry]
       #
-      def read_from_stream(consumer, read_id)
+      def read_from_stream(consumer, read_id, no_ack: false)
+        # To avoid this key becoming stale while the instance is still running.
+        set_expiry(available_consumers_key, ttl: 1.day)
+        set_expiry(available_stream_instances_key, ttl: 0.01)
+
         result = redis_pool.with do |redis|
-          redis.xreadgroup(group_name, consumer.name, stream_name, read_id, count: 1)&.values&.flatten
+          redis.xreadgroup(
+            group_name, consumer.name, stream_name, read_id,
+            count: 1,
+            noack: no_ack
+          )&.values&.flatten
         end
 
         return if result.blank?
@@ -244,13 +260,20 @@ module RedisIPC
           redis.xinfo(:consumers, stream_name, for_group_name)
         end
 
-        result = result.map { |r| CONSUMER_PROXY.new(**r.symbolize_keys) }
+        result = result.map { |r| ConsumerProxy.new(**r.symbolize_keys) }
 
         if filter_for.is_a?(Array)
           result.select! { |consumer| filter_for.include?(consumer.name) }
         end
 
         result.index_by(&:name)
+      end
+
+      #
+      # Clears the array of available consumers for this group
+      #
+      def clear_available_consumers
+        redis_pool.with { |redis| redis.del(available_consumers_key) }
       end
 
       #
@@ -266,24 +289,17 @@ module RedisIPC
         redis_pool.with do |redis|
           # 0 is start index
           # -1 is end index (like array)
-          redis.lrange(available_redis_consumers_key, 0, -1)
+          redis.lrange(available_consumers_key, 0, -1)
         end
       end
 
       def consumer_available?(consumer)
         result = redis_pool.with do |redis|
           # redis-rb does not have internal support for lpos. However, they do delegate missing methods
-          redis.lpos(available_redis_consumers_key, consumer.name, "RANK", 1)
+          redis.lpos(available_consumers_key, consumer.name, "RANK", 1)
         end
 
         !result.nil?
-      end
-
-      #
-      # Clears the array of available consumers for this group
-      #
-      def clear_available_consumers
-        redis_pool.with { |redis| redis.del(available_redis_consumers_key) }
       end
 
       #
@@ -295,7 +311,7 @@ module RedisIPC
         return if consumer_available?(consumer)
 
         redis_pool.with do |redis|
-          redis.lpush(available_redis_consumers_key, consumer.name)
+          redis.lpush(available_consumers_key, consumer.name)
         end
 
         true
@@ -311,7 +327,7 @@ module RedisIPC
 
         redis_pool.with do |redis|
           # 0 is remove all
-          redis.lrem(available_redis_consumers_key, 0, consumer.name)
+          redis.lrem(available_consumers_key, 0, consumer.name)
         end
 
         true
@@ -319,8 +335,14 @@ module RedisIPC
 
       private
 
-      def available_redis_consumers_key
-        "#{stream_name}:#{group_name}:available_consumers"
+      def available_consumers_key
+        "#{stream_name}:#{group_name}:#{@instance_id}:consumers"
+      end
+
+      def set_expiry(key, ttl: 1.second)
+        redis_pool.with do |redis|
+          redis.expire(key, ttl)
+        end
       end
     end
   end
