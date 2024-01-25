@@ -18,7 +18,9 @@ module RedisIPC
       self.group_name = group.to_s
 
       @on_request = nil
-      @on_error = ->(exception) { log(exception, severity: :error) }
+      @on_error = lambda do |exception|
+        log("#{exception.class} - #{exception}\n#{exception.backtrace}", severity: :error)
+      end
     end
 
     #
@@ -110,13 +112,11 @@ module RedisIPC
       # is dependent on how many threads are going to be sending entries at a single time.
       #
       # Since this code has no real life testing, this default is purely based on educated guesses.
-      # To make sure the connection pool is sufficiently padded, I'm allotting two connections per consumer which
-      # makes the default max pool size of 36 (=10 + (10 * 2) + (3 * 2))
       #
       max_pool_size = options[:max_pool_size] || (
         options[:pool_size] +
-        (options.dig(:consumer, :pool_size) * 2) +
-        (options.dig(:dispatcher, :pool_size) * 2)
+        (options.dig(:consumer, :pool_size) * 3) +
+        (options.dig(:dispatcher, :pool_size) * 3)
       )
 
       @logger = options[:logger]
@@ -131,6 +131,7 @@ module RedisIPC
 
       # Make sure the group is there
       @redis.create_group
+      @redis.prune_consumers
 
       @ledger = Ledger.new(options[:ledger])
       @consumers = create_consumers(options[:consumer])
@@ -264,7 +265,7 @@ module RedisIPC
       options[:pool_size].times.map do |index|
         name = "dispatcher_#{@instance_id}_#{index}"
 
-        dispatcher = Dispatcher.new(name, redis: @redis, ledger: @ledger, options: options)
+        dispatcher = Dispatcher.new(name, redis: @redis, options: options)
         dispatcher.add_callback(:on_error, self, :handle_exception)
         dispatcher.listen
 

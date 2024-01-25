@@ -6,7 +6,7 @@ RSpec.shared_context("stream") do
 
   let(:logger) { Logger.new($stdout, level: :info) }
 
-  let!(:redis_commands_opts) { {logger: logger} }
+  let!(:redis_commands_opts) { {} } # { {logger: logger} }
   let!(:redis_commands) do
     RedisIPC::Stream::Commands.new(stream_name, group_name, **redis_commands_opts)
   end
@@ -59,8 +59,8 @@ RSpec.shared_context("stream") do
     consumer_class.new(name, redis: redis, **)
   end
 
-  def create_dispatcher(name = nil, group: nil, ledger: nil, **)
-    create_consumer(name, group: group, consumer_class: RedisIPC::Stream::Dispatcher, ledger: ledger, **)
+  def create_dispatcher(name = nil, group: nil, **)
+    create_consumer(name, group: group, consumer_class: RedisIPC::Stream::Dispatcher, **)
   end
 
   def add_to_stream(entry = example_entry, redis: redis_commands)

@@ -309,25 +309,11 @@ describe RedisIPC::Stream::Commands do
       it { is_expected.to be_empty }
     end
 
-    context "when there are consumers for our group" do
+    context "when there are consumers" do
       let!(:consumer) { create_consumer }
 
       it "contains the consumer information" do
         is_expected.to have_key(consumer.name)
-      end
-    end
-
-    context "when there are consumers for another group" do
-      let!(:consumer) { create_consumer(group: "another_group") }
-
-      subject(:other_info) { redis_commands.consumer_info("another_group") }
-
-      it "returns nothing for our group" do
-        expect(info).to be_empty
-      end
-
-      it "returns data for another group" do
-        expect(other_info).to have_key(consumer.name)
       end
     end
 

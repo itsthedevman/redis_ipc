@@ -19,10 +19,12 @@ module RedisIPC
           return if entry.nil? || invalid_entry?(entry)
 
           ledger_entry = @ledger.fetch_entry(entry)
+          is_a_request = ledger_entry.nil? && entry.pending?
+          is_a_response = !ledger_entry.nil? && (entry.fulfilled? || entry.rejected?)
 
-          if entry.request?(ledger_entry)
+          if is_a_request
             process_request(entry)
-          elsif entry.response?(ledger_entry)
+          elsif is_a_response
             process_response(entry, ledger_entry)
           end
 

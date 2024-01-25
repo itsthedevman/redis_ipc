@@ -44,10 +44,7 @@ module RedisIPC
 
         redis_options = REDIS_DEFAULTS.merge(redis_options)
         @redis_pool = ConnectionPool.new(size: max_pool_size) { Redis.new(**redis_options) }
-      end
-
-      def log(content, severity: :debug)
-        @logger&.public_send(severity) { "<#{stream_name}:#{group_name}:#{instance_id}> #{content}" }
+        log("Created pool with a size of #{max_pool_size}")
       end
 
       #
@@ -75,8 +72,6 @@ module RedisIPC
       #
       def add_to_stream(entry)
         redis_id = redis_pool.with { |redis| redis.xadd(stream_name, entry.to_h) }
-        log("add_to_stream - Entry ID: #{entry.id}, Redis ID: #{redis_id}")
-
         entry.with(redis_id: redis_id)
       end
 
@@ -162,6 +157,14 @@ module RedisIPC
       end
 
       #
+      # Removes all consumers for this group that have been idle for longer than 30 seconds
+      #
+      def prune_consumers
+        consumer_info.values.select { |consumer| consumer.idle > 30.seconds.in_milliseconds.to_i }
+          .each { |consumer| delete_consumer(consumer) }
+      end
+
+      #
       # Reads an entry into the group using XREADGROUP
       #
       # @param consumer_name [String] The consumer reading the entry
@@ -171,8 +174,7 @@ module RedisIPC
       # @return [RedisIPC::Stream::Entry]
       #
       def read_from_stream(consumer, read_id, block: 500)
-        # To avoid this key becoming stale while the instance is still running.
-        set_expiry(available_consumers_key, ttl: 1.day)
+        set_expiry(available_consumers_key, ttl: 0.1)
 
         result = redis_pool.with do |redis|
           redis.xreadgroup(
@@ -255,9 +257,9 @@ module RedisIPC
       #
       # @param for_group_name [String] The group the consumers belong to
       #
-      def consumer_info(for_group_name = group_name, filter_for: nil)
+      def consumer_info(filter_for: nil)
         result = redis_pool.with do |redis|
-          redis.xinfo(:consumers, stream_name, for_group_name)
+          redis.xinfo(:consumers, stream_name, group_name)
         end
 
         result = result.map { |r| ConsumerProxy.new(**r.symbolize_keys) }
@@ -285,11 +287,11 @@ module RedisIPC
       #
       # @return [Array<String>]
       #
-      def available_consumer_names
+      def available_consumer_names(instance_id = @instance_id)
         redis_pool.with do |redis|
           # 0 is start index
           # -1 is end index (like array)
-          redis.lrange(available_consumers_key, 0, -1)
+          redis.lrange(available_consumers_key(instance_id), 0, -1)
         end
       end
 
@@ -335,13 +337,17 @@ module RedisIPC
 
       private
 
-      def available_consumers_key
-        "#{stream_name}:#{group_name}:#{@instance_id}:consumers"
+      def log(content, severity: :info)
+        @logger&.public_send(severity) { "<#{stream_name}:#{group_name}:#{instance_id}> #{content}" }
+      end
+
+      def available_consumers_key(instance_id = @instance_id)
+        "#{stream_name}:#{group_name}:#{instance_id}:consumers"
       end
 
       def set_expiry(key, ttl: 1.second)
         redis_pool.with do |redis|
-          redis.expire(key, ttl)
+          redis.expire(key, ttl.in_milliseconds.to_i)
         end
       end
     end

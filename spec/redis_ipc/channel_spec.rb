@@ -54,13 +54,6 @@ describe RedisIPC::Channel do
       channel_2b.connect(**redis_commands_opts)
     end
 
-    after do
-      channel_1a.disconnect
-      channel_1b.disconnect
-      channel_2a.disconnect
-      channel_2b.disconnect
-    end
-
     describe ".trigger_event" do
       context "when the event fulfills the request" do
         it "returns a fulfilled event that contains the result" do

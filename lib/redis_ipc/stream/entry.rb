@@ -112,12 +112,13 @@ module RedisIPC
         status == STATUS_REJECTED
       end
 
-      def request?(ledger_entry, ledger: nil)
-        ledger_entry.nil? && status == STATUS_PENDING
-      end
-
-      def response?(ledger_entry, ledger: nil)
-        !ledger_entry.nil? && [STATUS_FULFILLED, STATUS_REJECTED].include?(status)
+      #
+      # This is entry pending?
+      #
+      # @return [Boolean]
+      #
+      def pending?
+        status == STATUS_PENDING
       end
     end
   end

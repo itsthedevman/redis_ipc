@@ -60,9 +60,9 @@ module RedisIPC
       raise ConnectionError, "Channel #{group_name} is already connected" if connected?
 
       @stream = Stream.new(stream_name, group_name)
-        .on_request(&method(:on_request))
-        .on_error { |e| on_error&.call(e) }
-        .connect(**)
+      @stream.on_request(&method(:on_request))
+      @stream.on_error { |e| on_error.call(e) } if on_error
+      @stream.connect(**)
 
       true
     end

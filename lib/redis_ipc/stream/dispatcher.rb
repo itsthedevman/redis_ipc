@@ -14,9 +14,8 @@ module RedisIPC
         execution_interval: 0.001 # 1ms
       }.freeze
 
-      def initialize(name, ledger:, **)
+      def initialize(name, **)
         super(name, options: DEFAULTS, **)
-        @ledger = ledger
       end
 
       def listen
@@ -44,10 +43,14 @@ module RedisIPC
           return
         end
 
-        consumer = find_load_balanced_consumer
+        instance_id = entry.pending? ? @instance_id : entry.instance_id
+
+        consumer = find_load_balanced_consumer(instance_id)
         if consumer.nil?
+          log("DISPATCH_FAILURE #{group_name}:#{name} failed to find a consumer", severity: :error)
+
           acknowledge_entry(entry)
-          raise "DISPATCH_FAILURE #{group_name}:#{name} failed to find a consumer"
+          return
         end
 
         log("Dispatching to #{consumer.name}: #{entry.id}")
@@ -72,8 +75,8 @@ module RedisIPC
         @redis.next_reclaimed_entry(self) || @redis.next_unread_entry(self) || @redis.next_pending_entry(self)
       end
 
-      def consumer_info
-        @redis.consumer_info(filter_for: @redis.available_consumer_names)
+      def consumer_info(instance_id = @instance_id)
+        @redis.consumer_info(filter_for: @redis.available_consumer_names(instance_id))
       end
 
       def check_for_consumers!
@@ -82,8 +85,8 @@ module RedisIPC
         raise ConfigurationError, "No consumers available for #{stream_name}:#{group_name}. Please make sure at least one Consumer is listening before creating any Dispatchers"
       end
 
-      def find_load_balanced_consumer
-        consumer_info.values.min { |a, b| load_balance_consumer(a, b) }
+      def find_load_balanced_consumer(instance_id = @instance_id)
+        consumer_info(instance_id).values.min { |a, b| load_balance_consumer(a, b) }
       end
 
       MOVE_AHEAD = -1

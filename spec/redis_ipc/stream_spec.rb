@@ -12,10 +12,6 @@ describe RedisIPC::Stream do
     stream.on_error {}
   end
 
-  after do
-    stream.disconnect if stream.connected?
-  end
-
   describe "#connect" do
     context "when #on_request is nil" do
       before { stream.instance_variable_set(:@on_request, nil) }
@@ -116,8 +112,6 @@ describe RedisIPC::Stream do
       other_stream.connect(**redis_commands_opts)
       stream.connect(**redis_commands_opts)
     end
-
-    after { other_stream.disconnect }
 
     context "when an entry is sent" do
       it "receives a response" do

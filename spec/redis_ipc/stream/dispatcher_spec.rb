@@ -3,7 +3,7 @@
 describe RedisIPC::Stream::Dispatcher do
   include_context "stream"
 
-  let(:dispatcher) { create_dispatcher(ledger: ledger) }
+  let(:dispatcher) { create_dispatcher }
 
   describe "#check_for_entries" do
     let!(:consumer) do
