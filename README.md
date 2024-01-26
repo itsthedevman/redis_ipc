@@ -8,7 +8,7 @@ The `redis_ipc` gem provides a simple way to implement [Inter-Process Communicat
 
 - Simple and easy to implement
 - Quick and efficient communication between n-number of programs/processes
-- Concurrent and load-balanced
+- Thread-safe, process-safe, and load-balanced
 - **Inherently insecure**
   - Any process that has access to the Redis database can add/change/remove data in transit.
   - **Do not use RedisIPC in an untrusted environment!**
@@ -116,22 +116,6 @@ stream.connect(
 # This will block until "another_group" picks up the entry, or until the timeout is reached, in which this will raise an exception
 stream.send_to_group(content: "Hello!", to: "another_group")
 ```
-
-## What is a Stream?
-
-At the core of RedisIPC is the Stream (`RedisIPC::Stream`). The Stream class is the abstracted implementation of the underlying Consumer Group functionality. It provides ways to configure, connect, send, and receive data. The way Stream does this is by hosting n-number of Consumers and n-number of Dispatchers, along with a Ledger.
-
-### What is a Consumer?
-
-A Consumer (`RedisIPC::Stream::Consumer`) is an Ruby implementation of a Redis Consumer and its default job is to watch the stream and read in entries and process them. The Stream, however, uses a special Consumer called Ledger Consumer to handle processing entries instead for reasons which will be explained soon.
-
-### What is a Dispatcher?
-
-A Dispatcher (`RedisIPC::Stream::Dispatcher`) is another special Consumer that is essentially a bouncer for the Stream. Every entry posted to the Redis Stream is grabbed by every Dispatch, regardless of the group it belongs to and where the entry is going. The Dispatcher's job is to only process entries that are for its group. Once the Dispatcher has received an entry for the group, it will look at all active Consumers for its group, and dispatch the entry with the least amount of work.
-
-### What is the Ledger and Ledger Consumer?
-
-The Ledger (`RedisIPC::Stream::Ledger`) is the way the Stream tracks and handles timeouts for outbound entries. This is where Ledger Consumer (`RedisIPC::Stream::Ledger::Consumer`) come in. When entries are dispatched to them, they will check to see if the entry is in the Ledger. If the entry exists, the Ledger Consumer will then pass the entry to the waiting code. Entries that do not exist in the ledger are treated as inbound requests which bubble up to the Stream itself. This functionality, plus statuses, ensure entries are processed correctly without confusion.
 
 ## `RedisIPC::Stream` example
 
@@ -357,6 +341,26 @@ Contributions are welcome! RedisIPC has a great foundation and has everything I 
    ```bash
    bundle exec rspec spec
    ```
+
+### What is a Stream?
+
+At the core of RedisIPC is the Stream (`RedisIPC::Stream`). The Stream class is the abstracted implementation of the underlying Consumer Group functionality. It provides ways to configure, connect, send, and receive data. The way Stream does this is by hosting n-number of Consumers and n-number of Dispatchers, along with a Ledger.
+
+### What is a Consumer?
+
+A Consumer (`RedisIPC::Stream::Consumer`) is an Ruby implementation of a Redis Consumer and its default job is to watch the stream and read in entries and process them. The Stream, however, uses a special Consumer called Ledger Consumer to handle processing entries instead for reasons which will be explained soon.
+
+### What is a Dispatcher?
+
+A Dispatcher (`RedisIPC::Stream::Dispatcher`) is another special Consumer that is essentially a bouncer for the Stream. Every entry posted to the Redis Stream is received by every Dispatcher, regardless of the group it belongs to and where the entry is going. Once a Dispatcher receives an entry from the stream for its group and dispatch to group consumer, depending on the state of the entry and which instance it originated from.
+
+### What is the Ledger and Ledger Consumer?
+
+The Ledger (`RedisIPC::Stream::Ledger`) is the way the Stream tracks and handles timeouts for outbound entries. This is where Ledger Consumer (`RedisIPC::Stream::Ledger::Consumer`) come in. When entries are dispatched to them, they will check to see if the entry is in the Ledger. If the entry exists, the Ledger Consumer will then pass the entry to the waiting code. Entries that do not exist in the ledger are treated as inbound requests which bubble up to the Stream itself. This functionality, plus statuses, ensure entries are processed correctly without confusion.
+
+### Process-safe?
+Yes! As of 1.0.2, RedisIPC can be safely used in programs that have multiple processes, or instances, of them running at once.
+This is managed via an instance ID that is unique to each instance of a Stream/Channel which allows entries to be properly dispatched to the instance that original made the request. With this change, all Dispatchers across the instances for a group now work together to dispatch entries to each others consumers.
 
 ## License
 
