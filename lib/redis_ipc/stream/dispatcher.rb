@@ -33,6 +33,7 @@ module RedisIPC
       #
       def check_for_entries
         entry = read_from_stream
+        return if entry.nil?
 
         # When the dispatcher reads an entry from the stream, it is added to its PEL. Acknowledge to remove it.
         # Usually, the entry is also deleted but all dispatchers receive the same entry and deleting it causes it
@@ -42,10 +43,13 @@ module RedisIPC
           return
         end
 
-        consumer = find_load_balanced_consumer
+        instance_id = entry.pending? ? @instance_id : entry.instance_id
+
+        consumer = find_load_balanced_consumer(instance_id)
         if consumer.nil?
-          # TODO: Change this to raise so it bubbles up to the stream - consider what to do with the entry.
-          reject!(entry, reason: "DISPATCH_FAILURE #{group_name}:#{name} failed to find a consumer")
+          log("DISPATCH_FAILURE #{group_name}:#{name} failed to find a consumer", severity: :error)
+
+          acknowledge_entry(entry)
           return
         end
 
@@ -71,8 +75,8 @@ module RedisIPC
         @redis.next_reclaimed_entry(self) || @redis.next_unread_entry(self) || @redis.next_pending_entry(self)
       end
 
-      def consumer_info
-        @redis.consumer_info(filter_for: @redis.available_consumer_names)
+      def consumer_info(instance_id = @instance_id)
+        @redis.consumer_info(filter_for: @redis.available_consumer_names(instance_id))
       end
 
       def check_for_consumers!
@@ -81,8 +85,8 @@ module RedisIPC
         raise ConfigurationError, "No consumers available for #{stream_name}:#{group_name}. Please make sure at least one Consumer is listening before creating any Dispatchers"
       end
 
-      def find_load_balanced_consumer
-        consumer_info.values.min { |a, b| load_balance_consumer(a, b) }
+      def find_load_balanced_consumer(instance_id = @instance_id)
+        consumer_info(instance_id).values.min { |a, b| load_balance_consumer(a, b) }
       end
 
       MOVE_AHEAD = -1

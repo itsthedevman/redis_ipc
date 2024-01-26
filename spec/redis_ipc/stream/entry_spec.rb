@@ -2,7 +2,12 @@
 
 describe RedisIPC::Stream::Entry do
   subject(:entry) do
-    described_class.new(source_group: "source_group", destination_group: "destination_group", content: "content")
+    described_class.new(
+      instance_id: "",
+      source_group: "source_group",
+      destination_group: "destination_group",
+      content: "content"
+    )
   end
 
   it "is valid" do
@@ -21,6 +26,7 @@ describe RedisIPC::Stream::Entry do
     subject(:entry) do
       described_class.new(
         id: "id",
+        instance_id: "",
         source_group: "source_group",
         destination_group: "destination_group",
         content: "content"
@@ -38,6 +44,7 @@ describe RedisIPC::Stream::Entry do
     subject(:entry) do
       described_class.new(
         id: "id",
+        instance_id: "id",
         source_group: "source_group",
         destination_group: "destination_group",
         content: "content"

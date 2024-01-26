@@ -16,18 +16,16 @@ module RedisIPC
 
         def check_for_entries
           entry = read_from_stream
-          return if invalid_entry?(entry)
+          return if entry.nil? || invalid_entry?(entry)
 
           ledger_entry = @ledger.fetch_entry(entry)
-          is_a_request = ledger_entry.nil? && entry.status == "pending"
-          is_a_response = !ledger_entry.nil? && ["fulfilled", "rejected"].include?(entry.status)
+          is_a_request = ledger_entry.nil? && entry.pending?
+          is_a_response = !ledger_entry.nil? && (entry.fulfilled? || entry.rejected?)
 
           if is_a_request
             process_request(entry)
           elsif is_a_response
             process_response(entry, ledger_entry)
-          else
-            reject!(entry, reason: "REQUEST_EXPIRED The request related to this entry has expired")
           end
 
           # In the normal Consumer workflow, `#check_for_entries` will pass the entry to any observers listening.
@@ -40,7 +38,7 @@ module RedisIPC
           # `Consumer#add_observer` will need to handle the `nil` "entry" that can be passed through
           nil
         ensure
-          acknowledge_and_remove(entry)
+          acknowledge_and_remove(entry) unless entry.nil?
         end
 
         private

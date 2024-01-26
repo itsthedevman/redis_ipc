@@ -31,6 +31,7 @@ module RedisIPC
         raise ArgumentError, "Consumer was created without a name" if @name.blank?
 
         @redis = redis
+        @instance_id = redis.instance_id
 
         @redis.create_consumer(self)
         @options = DEFAULTS.merge(options).freeze
@@ -102,7 +103,7 @@ module RedisIPC
         @task.execute
         change_availability
 
-        log("Ready")
+        log("Ready", severity: :debug)
         @task
       end
 
@@ -113,7 +114,7 @@ module RedisIPC
         @task.shutdown
         change_availability
 
-        log("Stopped")
+        log("Stopped", severity: :debug)
         true
       end
 
@@ -134,17 +135,19 @@ module RedisIPC
       #
       def check_for_entries
         entry = read_from_stream
-        return if invalid_entry?(entry)
+        return if entry.nil? || invalid_entry?(entry)
 
         entry
       ensure
-        acknowledge_and_remove(entry)
+        acknowledge_and_remove(entry) unless entry.nil?
       end
 
       private
 
       def log(content, severity: :info)
-        @logger&.public_send(severity) { "<#{stream_name}:#{group_name} #{name}> #{content}" }
+        @logger&.public_send(severity) do
+          "<#{stream_name}:#{group_name}:#{name}> #{content}"
+        end
       end
 
       #
@@ -165,18 +168,14 @@ module RedisIPC
       end
 
       def invalid_entry?(entry)
-        entry.nil? || entry.destination_group != group_name
+        entry.destination_group != group_name
       end
 
       def acknowledge_entry(entry)
-        return if entry.nil?
-
         @redis.acknowledge_entry(entry)
       end
 
       def acknowledge_and_remove(entry)
-        return if entry.nil?
-
         @redis.acknowledge_entry(entry)
         @redis.delete_entry(entry)
       end

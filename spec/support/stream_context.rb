@@ -3,9 +3,10 @@
 RSpec.shared_context("stream") do
   let!(:stream_name) { "example_stream" }
   let!(:group_name) { "example_group" }
-  let(:logger) { Logger.new($stdout) }
 
-  let!(:redis_commands_opts) { {logger: logger} } # Use if logging is needed
+  let(:logger) { Logger.new($stdout, level: :info) }
+
+  let!(:redis_commands_opts) { {} } # { {logger: logger} }
   let!(:redis_commands) do
     RedisIPC::Stream::Commands.new(stream_name, group_name, **redis_commands_opts)
   end
@@ -13,8 +14,11 @@ RSpec.shared_context("stream") do
   let(:redis_pool) { redis_commands.redis_pool }
   let(:redis) { redis_pool.checkout }
 
+  let(:ledger) { RedisIPC::Stream::Ledger.new }
+
   let(:example_entry) do
     RedisIPC::Stream::Entry.new(
+      instance_id: redis_commands.instance_id,
       source_group: group_name,
       destination_group: "other_example_group",
       content: Faker::String.random
@@ -69,6 +73,7 @@ RSpec.shared_context("stream") do
 
   def send_to_consumer(consumer, content:)
     entry = RedisIPC::Stream::Entry.new(
+      instance_id: redis_commands.instance_id,
       content: content,
       source_group: group_name,
       destination_group: consumer.group_name

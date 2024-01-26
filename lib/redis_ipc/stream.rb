@@ -5,6 +5,8 @@ module RedisIPC
     class_attribute :stream_name
     class_attribute :group_name
 
+    attr_reader :redis
+
     #
     # Joins a Stream with the given name and creates the group with the given name
     #
@@ -16,7 +18,9 @@ module RedisIPC
       self.group_name = group.to_s
 
       @on_request = nil
-      @on_error = nil
+      @on_error = lambda do |exception|
+        log("#{exception.class} - #{exception}\n#{exception.backtrace}", severity: :error)
+      end
     end
 
     #
@@ -108,13 +112,11 @@ module RedisIPC
       # is dependent on how many threads are going to be sending entries at a single time.
       #
       # Since this code has no real life testing, this default is purely based on educated guesses.
-      # To make sure the connection pool is sufficiently padded, I'm allotting two connections per consumer which
-      # makes the default max pool size of 36 (=10 + (10 * 2) + (3 * 2))
       #
       max_pool_size = options[:max_pool_size] || (
         options[:pool_size] +
-        (options.dig(:consumer, :pool_size) * 2) +
-        (options.dig(:dispatcher, :pool_size) * 2)
+        (options.dig(:consumer, :pool_size) * 3) +
+        (options.dig(:dispatcher, :pool_size) * 3)
       )
 
       @logger = options[:logger]
@@ -125,8 +127,11 @@ module RedisIPC
         **options.slice(:logger, :reset)
       )
 
+      @instance_id = @redis.instance_id
+
       # Make sure the group is there
       @redis.create_group
+      @redis.prune_consumers
 
       @ledger = Ledger.new(options[:ledger])
       @consumers = create_consumers(options[:consumer])
@@ -220,7 +225,7 @@ module RedisIPC
     private
 
     def log(content, severity: :info)
-      @logger&.public_send(severity) { "<#{stream_name}:#{group_name}> #{content}" }
+      @logger&.public_send(severity) { "<#{stream_name}:#{group_name}:#{@instance_id}> #{content}" }
     end
 
     def handle_entry(entry)
@@ -245,7 +250,7 @@ module RedisIPC
       @redis.clear_available_consumers
 
       options[:pool_size].times.map do |index|
-        name = "consumer_#{index}"
+        name = "consumer_#{@instance_id}_#{index}"
 
         consumer = Ledger::Consumer.new(name, redis: @redis, ledger: @ledger, options: options)
         consumer.add_callback(:on_error, self, :handle_exception)
@@ -258,7 +263,7 @@ module RedisIPC
 
     def create_dispatchers(options)
       options[:pool_size].times.map do |index|
-        name = "dispatcher_#{index}"
+        name = "dispatcher_#{@instance_id}_#{index}"
 
         dispatcher = Dispatcher.new(name, redis: @redis, options: options)
         dispatcher.add_callback(:on_error, self, :handle_exception)
@@ -269,7 +274,12 @@ module RedisIPC
     end
 
     def track_and_send(content, destination_group)
-      entry = Entry.new(content: content, source_group: group_name, destination_group: destination_group)
+      entry = Entry.new(
+        instance_id: @redis.instance_id,
+        content: content,
+        source_group: group_name,
+        destination_group: destination_group
+      )
 
       log("Sending entry #{entry.id} to \"#{entry.destination_group}\" with: #{entry.content}")
 

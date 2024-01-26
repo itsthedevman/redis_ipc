@@ -60,9 +60,9 @@ module RedisIPC
       raise ConnectionError, "Channel #{group_name} is already connected" if connected?
 
       @stream = Stream.new(stream_name, group_name)
-        .on_request(&method(:on_request))
-        .on_error { |e| on_error&.call(e) }
-        .connect(**)
+      @stream.on_request(&method(:on_request))
+      @stream.on_error { |e| on_error.call(e) } if on_error
+      @stream.connect(**)
 
       true
     end
@@ -141,13 +141,21 @@ module RedisIPC
       end
 
       begin
-        result = event_container.execute(event_data[:params])
+        result = event_container.execute(
+          params: event_data[:params],
+
+          # Metadata
+          # I'm sending the stream name and group name now instead of when the event is created because
+          # those values could be set AFTER an event has been defined
+          entry: entry,
+          stream_name: stream_name,
+          group_name: group_name,
+          instance_id: @stream.redis.instance_id
+        )
+
         @stream.fulfill_request(entry, content: result)
       rescue => e
-        @stream.reject_request(
-          entry,
-          content: {class: e.class, message: e.message, backtrace: e.backtrace}
-        )
+        @stream.reject_request(entry, content: e.message)
       end
     end
 
@@ -156,7 +164,7 @@ module RedisIPC
     # This also gives a container for calling said callback
     #
     class Event
-      attr_reader :params
+      attr_reader :params, :source_group, :stream_name, :group_name, :instance_id
 
       def initialize(params, &callback)
         @params_layout = params
@@ -165,8 +173,13 @@ module RedisIPC
         define_singleton_method(:execute_callback, &callback)
       end
 
-      def execute(params)
+      def execute(params:, stream_name:, group_name:, instance_id:, entry: nil)
         @params = params.with_indifferent_access.slice(*@params_layout)
+        @stream_name = stream_name
+        @group_name = group_name
+        @source_group = entry&.source_group
+        @instance_id = instance_id
+
         execute_callback
       ensure
         @params = nil
