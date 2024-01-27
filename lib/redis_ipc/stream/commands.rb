@@ -175,6 +175,7 @@ module RedisIPC
       #
       def read_from_stream(consumer, read_id, block: 500)
         set_expiry(available_consumers_key, ttl: 0.1)
+        set_expiry(stream_name, ttl: 7.days)
 
         result = redis_pool.with do |redis|
           redis.xreadgroup(

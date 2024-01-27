@@ -6,7 +6,7 @@ module RedisIPC
       DEFAULTS = {
         # The number of Consumers to create to process entries for their group.
         # Any consumers created for a group will only process entries for their group
-        pool_size: 10,
+        pool_size: 20,
 
         # How often does the consumer check for new entries
         execution_interval: 0.001 # 1ms

@@ -8,7 +8,7 @@ module RedisIPC
     class Dispatcher < Consumer
       DEFAULTS = {
         # The number of Dispatchers to create
-        pool_size: 3,
+        pool_size: 10,
 
         # How often should the consumer process entries in seconds
         execution_interval: 0.001 # 1ms
