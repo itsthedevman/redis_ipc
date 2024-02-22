@@ -18,7 +18,11 @@ module RedisIPC
           entry = read_from_stream
           return if entry.nil? || invalid_entry?(entry)
 
-          ledger_entry = @ledger.fetch_entry(entry)
+          log("Received: #{entry.id}")
+          log("Entry: #{entry}")
+          log("Ledger: #{@ledger}")
+
+          ledger_entry = @ledger.remove(entry)
           is_a_request = ledger_entry.nil? && entry.pending?
           is_a_response = !ledger_entry.nil? && (entry.fulfilled? || entry.rejected?)
 
@@ -26,6 +30,8 @@ module RedisIPC
             process_request(entry)
           elsif is_a_response
             process_response(entry, ledger_entry)
+          else
+            log("INVALID entry received - #{entry}", severity: :warn)
           end
 
           # In the normal Consumer workflow, `#check_for_entries` will pass the entry to any observers listening.
@@ -58,7 +64,7 @@ module RedisIPC
 
           # ledger_entry#mailbox is type Concurrent::MVar. Currently Stream#track_and_send is waiting for a value
           # to be stored in here. Once this happens, that thread will receive this value and return it to the caller
-          ledger_entry.mailbox.put(entry)
+          ledger_entry.put(entry)
         end
       end
     end

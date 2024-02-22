@@ -64,14 +64,9 @@ module RedisIPC
     #   This disables the automatic configuration mentioned above
     #   Default: nil
     #
-    # @option options [Hash] :ledger
-    #   Configuration options for the ledger
-    # @option ledger [Integer] :entry_timeout
+    # @option options [Integer] :entry_timeout
     #   How long should it take before the entry is considered timed-out when sending requests
     #   Default: 5 (seconds)
-    # @option ledger [Integer] :cleanup_interval
-    #   How often should the ledger check for expired entries before removing them
-    #   Default: 1 (second)
     #
     # @option options [Hash] :consumer
     #   Configuration options for the Consumers
@@ -95,11 +90,11 @@ module RedisIPC
     def connect(redis_options: {}, **options)
       check_for_valid_configuration!
 
-      options = {
+      @options = {
         logger: nil,
         pool_size: 10,
         max_pool_size: nil,
-        ledger: Ledger::DEFAULTS,
+        entry_timeout: 5,
         consumer: Ledger::Consumer::DEFAULTS,
         dispatcher: Dispatcher::DEFAULTS
       }.deep_merge(options)
@@ -113,18 +108,18 @@ module RedisIPC
       #
       # Since this code has no real life testing, this default is purely based on educated guesses.
       #
-      max_pool_size = options[:max_pool_size] || (
-        options[:pool_size] +
-        (options.dig(:consumer, :pool_size) * 3) +
-        (options.dig(:dispatcher, :pool_size) * 3)
+      max_pool_size = @options[:max_pool_size] || (
+        @options[:pool_size] +
+        (@options.dig(:consumer, :pool_size) * 3) +
+        (@options.dig(:dispatcher, :pool_size) * 3)
       )
 
-      @logger = options[:logger]
+      @logger = @options[:logger]
       @redis = Commands.new(
         stream_name, group_name,
         max_pool_size: max_pool_size,
         redis_options: redis_options,
-        **options.slice(:logger, :reset)
+        **@options.slice(:logger)
       )
 
       @instance_id = @redis.instance_id
@@ -133,9 +128,9 @@ module RedisIPC
       @redis.create_group
       @redis.prune_consumers
 
-      @ledger = Ledger.new(options[:ledger])
-      @consumers = create_consumers(options[:consumer])
-      @dispatchers = create_dispatchers(options[:dispatcher])
+      @ledger = Ledger.new
+      @consumers = create_consumers(@options.delete(:consumer))
+      @dispatchers = create_dispatchers(@options.delete(:dispatcher))
 
       log("Connected")
       self
@@ -285,12 +280,14 @@ module RedisIPC
 
       # The entry must be added to the ledger before adding to the stream as that, in testing, the consumers can
       # get ahold of the entry before the ledger has everything ready.
-      mailbox = @ledger.store_entry(entry)
+      mailbox = @ledger.add(entry)
       entry = @redis.add_to_stream(entry)
+
+      log("Ledger: #{@ledger}")
 
       # The mailbox is a Concurrent::MVar which allows us to wait for data to be added (or timeout)
       # This is handled in Ledger::Consumer
-      case (result = mailbox.take(@ledger.options[:entry_timeout]))
+      case (result = mailbox.take(@options[:entry_timeout]))
       when Stream::Entry
         if result.fulfilled?
           Response.fulfilled(result.content)
@@ -310,7 +307,8 @@ module RedisIPC
         Response.rejected(TimeoutError.new)
       end
     ensure
-      @ledger.delete_entry(entry)
+      log("Deleting #{entry.id}")
+      @ledger.remove(entry)
     end
   end
 end
