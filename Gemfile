@@ -15,6 +15,9 @@ group :development, :test do
   gem "rubocop-rails", "~> 2.21", require: false
   gem "pry"
   gem "benchmark-ips"
+end
+
+group :development, :documentation do
   gem "yard"
   gem "kramdown"
 end
